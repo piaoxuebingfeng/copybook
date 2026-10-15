@@ -1,20 +1,21 @@
-"""拼音字帖验收 —— 从产物反查，不信生成器的自述。
+"""拼音字帖验收 —— 从产物里量，不信生成器的自报。
 
-查四件事，每件都能独立把「看着差不多但其实是错的」抓出来：
+版式（一方格一个音节）下要抓的错，和 v1「一行一个音节」不完全一样：
 
-1. **三带等高**：每个四线三格必须由 3 个等高的子行组成（四线三格的立身之本）
-2. **贴图对齐**：描红图的锚点必须在三条带的第一行、**纵向零偏移**，高度必须
-   **正好等于三行子行之和**。差 1px，图里的带界就和 Excel 的虚线错开，
-   字母会整条带地偏 —— 而且不报错。
-3. **贴图内容**：把 xlsx 里嵌的图按**像素内容**反查是哪个音节，与音节气清单逐块比对
-   （不看文件名，重复渲染 / 贴错图都会被抓出来）
-4. **PDF 落带**：导出后量真实像素 —— 两条虚虚线必须把上下绿实线**严格三等分**，
-   描红墨迹的顶部要进上带、底部要落在中带下沿（基线）
+  ① 三带不等高 / 子行高不是整数像素 —— 带界错位，字母整条带地偏
+  ② 贴图纵向偏移或高度 ≠ 三行子行之和 —— 同上，且**不报错**
+  ③ 贴图放错格 / 示范格贴成了描红图 / 描红格贴成了示范图
+     —— 按**像素内容**反查每张图是哪个音节的哪种角色（示范黑 / 描红灰）
+  ④ PDF 里虚线没有把绿线严格三等分 / 竖分隔线位置漂了
+  ⑤ 墨迹落带与渲染意图不一致（含声调必须进上带、降部必须进下带）
+
+判据的教训（v1 踩过）：不能写「墨迹底部 ≈ 2/3」——`g` 的降部本来就该伸到
+下带，判据错会冤枉正确的产物。这里的判据一律是「**与渲染意图一致**」。
 
 用法：
-    python3 verify_pinyin.py 字帖.xlsx --chars="bā 八 mā 妈" [--pdf=字帖.pdf]
+    python3 verify_pinyin.py 字帖.xlsx --chars="bā 八 / mā 妈" [--pdf=字帖.pdf] \
+        [--trace-times=full|N] [--font=路径]
 """
-import glob
 import hashlib
 import os
 import sys
@@ -26,267 +27,323 @@ import pinyin_input as P
 import render_pinyin as RP
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
-
 ARG = {}
 for _a in sys.argv[1:]:
     if _a.startswith("--"):
         _k, _sep, _v = _a.partition("=")
         ARG[_k] = _v if _sep else "1"
 
-TOL_CM = 0.02          # 三带等高的容差
-FAIL = []
+XLSX = sys.argv[1] if len(sys.argv) > 1 and not sys.argv[1].startswith("--") else None
+if not XLSX:
+    raise SystemExit("用法：python3 verify_pinyin.py 字帖.xlsx --chars=\"bā 八 / mā 妈\" "
+                     "[--pdf=字帖.pdf] [--trace-times=full|N] [--font=路径]")
+XLSX = XLSX if XLSX.startswith("/") else os.path.join(ROOT, XLSX)
+
+SRC = ""
+if ARG.get("--file"):
+    _p = ARG["--file"] if ARG["--file"].startswith("/") else os.path.join(ROOT, ARG["--file"])
+    SRC = open(_p, encoding="utf-8").read()
+else:
+    SRC = ARG.get("--chars", ARG.get("--items", ""))
+ITEMS = [(i, h) for _, lst in P.parse_items(SRC) for i, h in lst]
+if not ITEMS:
+    raise SystemExit("✗ --chars/--file 没有解析出音节")
+_bad = P.validate(ITEMS)
+if _bad:
+    raise SystemExit("✗ 输入里有非法音节：" + "、".join(_bad))
+
+PDF = ARG.get("--pdf")
+PDF = PDF if not PDF or PDF.startswith("/") else os.path.join(ROOT, PDF)
+FONT = RP.find_font(P.needed_chars(ITEMS), ARG.get("--font"))
+GEO = RP.cell_plan([i for i, _ in ITEMS], FONT)
+BANDS, CELL_PX, COLS = GEO["bands"], GEO["cell_px"], GEO["cols"]
+BOX_W, BOX_H, INSET_X = GEO["box_w"], GEO["box_h"], GEO["inset_x"]
+BAND_PX = GEO["band_px"]
+
+_tt = ARG.get("--trace-times", "full")
+N_TRACE = COLS - 1 if _tt == "full" else max(0, min(int(_tt), COLS - 1))
+
+# 渲染意图（验收的对照标准）：每个音节的示范图与描红图
+INTENT = {}
+for it, _hz in ITEMS:
+    rt = RP.normalize_text(it, FONT)
+    INTENT[it] = {
+        "render": rt,
+        "model": RP.render_cell(rt, FONT, BOX_W, BOX_H, RP.INK),
+        "trace": RP.render_cell(rt, FONT, BOX_W, BOX_H, RP.TRACE),
+    }
+
+fails = []
 
 
-def fail(msg):
-    FAIL.append(msg)
-    print(f"  ✗ {msg}")
-
-
-def ok(msg):
-    print(f"  ✓ {msg}")
+def check(cond, ok_msg, bad_msg):
+    if cond:
+        print(f"  ✓ {ok_msg}")
+    else:
+        print(f"  ✗ {bad_msg}")
+        fails.append(bad_msg)
+    return cond
 
 
 def pixhash(img):
-    """按**解码后的像素**做指纹，而不是 PNG 字节 —— 编码差异不该算作不同。"""
-    return hashlib.md5(np.array(img.convert("RGBA")).tobytes()).hexdigest()
+    """像素内容哈希 —— 认内容不认文件名（防贴错图）。"""
+    return hashlib.md5(np.asarray(img.convert("RGBA")).tobytes()).hexdigest()
 
 
-# ---------------------------------------------------------------- xlsx 侧
+# ================================================================ xlsx
+print(f"=== xlsx 几何与贴图 ===  {os.path.basename(XLSX)}")
+from openpyxl import load_workbook
+
+wb = load_workbook(XLSX)
+ws = wb.active
+
+
 def find_bands(ws):
-    """结构识别四线三格：上边绿实线 + 两条灰虚线 + 下边绿实线，且三行等高。
+    """按边框模式找四线三格：行 r 顶部有边线、底部虚线 -> r 是带上沿。
 
     认「边框长什么样」而不是认行号 —— 行号会随排版改动而变。
     """
-    def bd(cell, which):
-        s = getattr(cell.border, which)
-        if s is None or not s.style:
-            return None
-        col = getattr(s.color, "rgb", None)
-        return (s.style, (str(col)[2:] if col and len(str(col)) == 8 else str(col)).upper())
-
-    bands, heights = [], {}
-    for r in sorted(int(k) for k in ws.row_dimensions):
-        heights[r] = ws.row_dimensions[r].height
-    for r in sorted(heights):
-        try:
-            t = bd(ws.cell(row=r, column=1), "top")
-            b1 = bd(ws.cell(row=r, column=1), "bottom")
-            b2 = bd(ws.cell(row=r + 1, column=1), "bottom")
-            b3 = bd(ws.cell(row=r + 2, column=1), "bottom")
-        except Exception:
-            continue
-        if not (t and t[0] == "thin" and b1 and b1[0] == "dashed"
-                and b2 and b2[0] == "dashed" and b3 and b3[0] == "thin"):
-            continue
-        bands.append(r)
-    return bands, heights
+    out = []
+    for r in range(1, ws.max_row + 1):
+        bd = ws.cell(row=r, column=1).border
+        nxt = ws.cell(row=r + 1, column=1).border if r + 1 <= ws.max_row else None
+        if (bd.top is not None and bd.bottom is not None
+                and bd.bottom.style == "dashed"
+                and nxt is not None and nxt.bottom is not None):
+            out.append(r)
+    return [r for r in out if r + BANDS - 1 <= ws.max_row]
 
 
-def images_by_row(ws):
-    EMU = 9525
-    out = {}
-    for im in ws._images:
-        a = im.anchor
-        out.setdefault(a._from.row, []).append((a, im))
-    return out, EMU
+band_rows = find_bands(ws)
+check(len(band_rows) == len(ITEMS),
+      f"识别到 {len(band_rows)} 个四线三格，清单里有 {len(ITEMS)} 个音节",
+      f"四线三格数量 {len(band_rows)} != 音节数 {len(ITEMS)}")
 
+# ── ① 三带等高 ──
+okh = True
+for r in band_rows:
+    hs = [ws.row_dimensions[r + b].height for b in range(BANDS)]
+    if any(h is None or abs(h - hs[0]) > 0.01 for h in hs):
+        okh = False
+exp_sub = BAND_PX * 0.75                     # band_px * 72/96 = 子行高（pt）
+okv = all(abs(ws.row_dimensions[r].height - exp_sub) < 0.01 for r in band_rows)
+okv = all(abs(ws.row_dimensions[r].height - exp_sub) < 0.01 for r in band_rows)
+check(okh and okv,
+      f"全部 {len(band_rows)} 个块三带等高（{exp_sub}pt × {BANDS}）",
+      "三带不等高或子行高不是整数像素量化值")
 
-def check_xlsx(path, items, geo, n_trace, font):
-    from openpyxl import load_workbook
-    wb = load_workbook(path)
-    ws = wb.active
-    print(f"\n=== xlsx 几何与贴图 ===  {os.path.basename(path)}")
-
-    bands, heights = find_bands(ws)
-    print(f"  识别到 {len(bands)} 个四线三格，清单里有 {len(items)} 个音节")
-    if len(bands) != len(items):
-        fail(f"四线三格个数 {len(bands)} 与音节个数 {len(items)} 不一致")
-
-    # 1) 三带等高
-    bad_eq = []
-    for r in bands:
-        v = [heights.get(r + i) for i in range(3)]
-        if None in v or len(set(round(x, 4) for x in v)) != 1:
-            bad_eq.append((r, v))
-    if bad_eq:
-        fail(f"三带不等高的块：{bad_eq[:3]}")
-    else:
-        ok(f"全部 {len(bands)} 个块三带等高（{heights[bands[0]]}pt x 3）")
-
-    # 2) 贴图对齐
-    ibyr, EMU = images_by_row(ws)
-    sub_px = geo["band_px"]
-    bad_anchor, missing = [], []
-    for r in bands:
-        lst = ibyr.get(r - 1, [])
-        if len(lst) != 1:
-            missing.append((r, len(lst)))
-            continue
-        a, im = lst[0]
-        cy = a.ext.cy / EMU
-        cx = a.ext.cx / EMU
-        if abs(cy - geo["box_h"]) > 0.5:
-            bad_anchor.append((r, "高度", cy, geo["box_h"]))
-        if abs(a._from.rowOff / EMU) > 0.5:
-            bad_anchor.append((r, "纵向偏移非零", a._from.rowOff / EMU, 0))
-        if abs(cx - geo["box_w"]) > 0.5:
-            bad_anchor.append((r, "宽度", cx, geo["box_w"]))
-    if missing:
-        fail(f"这些块没有唯一的贴图：{missing[:3]}")
-    if bad_anchor:
-        fail(f"贴图锚点不对（差 1px 就整条带偏）：{bad_anchor[:3]}")
-    else:
-        ok(f"全部贴图纵向零偏移、高度 {geo['box_h']}px = 三行子行之和、宽 {geo['box_w']}px")
-
-    # 3) 贴图内容 -> 反查音节
-    lookup = {}
-    for it, hz in items:
-        img, drawn = RP.render_band(it, font, geo["box_w"], geo["box_h"], n_trace)
-        lookup[pixhash(img)] = (it, hz, drawn)
-    wrong, unknown = [], 0
-    for r in bands:
-        lst = ibyr.get(r - 1, [])
-        if not lst:
-            continue
-        img = Image.open(lst[0][1].ref)
-        hit = lookup.get(pixhash(img))
-        if hit is None:
-            unknown += 1
-            continue
-        it, hz, drawn = hit
-        # 墨迹必须落在正确的带上
-        a = np.array(img.convert("RGBA"))[..., 3] > 20
-        h = img.size[1]
-        rows = np.flatnonzero(a.any(axis=1))
-        if not rows.size:
-            wrong.append((it, "整张图没有墨迹"))
-            continue
-        top, bot = int(rows.min()), int(rows.max())
-        if bot > int(2 * h / 3) + 2:          # 底部不该越到中带以下，除非真有降部
-            pass
-        if top > int(h / 3):                  # 顶部必须进上带
-            wrong.append((it, f"顶部 {top} 没进上带（带界 {h//3}）"))
-        if abs(bot - 2 * h / 3) > 0.10 * h:
-            wrong.append((it, f"基线 {bot} 偏离 2/3（应为 {2*h/3:.0f}）"))
-    if unknown:
-        fail(f"{unknown} 张贴图在清单里找不到对应的音节（贴错图或渲染不一致）")
-    if wrong:
-        fail(f"落带不对：{wrong[:5]}")
-    if not unknown and not wrong:
-        ok(f"全部 {len(bands)} 张贴图按像素反查命中，且墨迹落带正确")
-    return ws
-
-
-# ---------------------------------------------------------------- PDF 侧
-def check_pdf(path, items, geo, n_trace, font):
-    """PDF 侧：四线格必须严格三等分；印出来的墨迹位置必须和渲染器的意图一致。
-
-    注意**不能**用「墨迹底部 ≈ 2/3」当判据：`shàng` 的 `g` 有降部，底部本来就该
-    伸到下带（78%），拿基线去卡它会把正确的产物判成错的。真正的不变量是
-    「PDF 里量到的墨迹范围 == 渲染器为该音节生成的那张图里的墨迹范围」，
-    它同时覆盖升部、降部和声调，且对任何音节都成立。
-    """
-    import pymupdf
-    print(f"\n=== PDF 真实像素 ===  {os.path.basename(path)}")
-    # 渲染器意图：每个音节的墨迹在 90px 高盒子里占哪几行
-    want = []
-    for it, hz in items:
-        img, _ = RP.render_band(it, font, geo["box_w"], geo["box_h"], n_trace)
-        a = np.array(img.convert("RGBA"))[..., 3] > 20
-        rr = np.flatnonzero(a.any(axis=1))
-        want.append((int(rr.min()), int(rr.max())) if rr.size else None)
-
-    doc = pymupdf.open(path)
-    DPI, SCALE = 200, 200 / 96.0        # 图里 1px = PDF 里 2.08px
-    TOL = 5                             # 抗锯齿边缘的容差（PDF 侧 ~2px@96dpi）
-    bad, total, checked = 0, 0, 0
-    for pno in range(doc.page_count):
-        pm = doc[pno].get_pixmap(dpi=DPI)
-        arr = np.frombuffer(pm.samples, dtype=np.uint8).reshape(pm.height, pm.width, pm.n)
-        R, G, B = (arr[..., i].astype(int) for i in range(3))
-        pink = (abs(R - 232) < 45) & (abs(G - 192) < 45) & (abs(B - 192) < 45) & (R > G + 10)
-        green = (G > 120) & (R < 110) & (B < 130)
-        gray = (abs(R - G) < 14) & (abs(G - B) < 14) & (R > 100) & (R < 215)
-        W = pm.width
-
-        def rows(frac, mask):
-            return [y for y in range(mask.shape[0])
-                    if mask[y].any() and mask[y].sum() >= frac * W]
-
-        def collapse(ys, gap=4):
-            out = []
-            for y in ys:
-                if out and y - out[-1][-1] <= gap:
-                    out[-1].append(y)
-                else:
-                    out.append([y])
-            return [int(np.mean(g)) for g in out]
-
-        gr, dr = collapse(rows(0.80, green)), collapse(rows(0.20, gray))
-        for i in range(0, len(gr) - 1, 2):
-            top, bot = gr[i], gr[i + 1]
-            h = bot - top
-            total += 1
-            idx = total - 1                      # 第几块 = 第几个音节（都按文档顺序）
-            mid = [y for y in dr if top < y < bot]
-            t1, t2 = top + h / 3, top + 2 * h / 3
-            if len(mid) != 2 or abs(mid[0] - t1) > 3 or abs(mid[1] - t2) > 3:
-                bad += 1
-                fail(f"第 {pno+1} 页第 {total} 块三带不等分：虚线 {mid}，应在 {t1:.0f}/{t2:.0f}")
-                continue
-            rr = np.flatnonzero(pink[top:bot + 1].any(axis=1))
-            if not rr.size or idx >= len(want) or want[idx] is None:
-                continue
-            checked += 1
-            got = (float(rr.min()), float(rr.max()))
-            exp = (want[idx][0] * SCALE, want[idx][1] * SCALE)
-            if abs(got[0] - exp[0]) > TOL or abs(got[1] - exp[1]) > TOL:
-                it = items[idx][0]
-                bad += 1
-                fail(f"第 {pno+1} 页第 {total} 块（{it}）：墨迹 {got[0]:.0f}~{got[1]:.0f}px，"
-                     f"渲染意图 {exp[0]:.0f}~{exp[1]:.0f}px（容差 {TOL}）")
-    if not bad:
-        ok(f"{doc.page_count} 页共 {total} 个四线格：虚线严格三等分（≤3px@200dpi），"
-           f"{checked} 个块的墨迹位置与渲染意图一致（≤{TOL}px）")
-    return doc.page_count, total
-
-
-if __name__ == "__main__":
-    xlsx = None
-    for a in sys.argv[1:]:
-        if not a.startswith("--"):
-            xlsx = a if a.startswith("/") else os.path.join(ROOT, a)
+# ── ② 格子列数 ──
+# 注意 openpyxl 的坑：没设过边框的单元格，border.right 是「style=None 的 Side 对象」
+# 而不是 None —— 判 style 才对，判对象本身永远为真。
+ncols_found = set()
+for r in band_rows:
+    n = 0
+    while (ws.cell(row=r, column=n + 1).border.right is not None
+           and ws.cell(row=r, column=n + 1).border.right.style is not None):
+        n += 1
+        if n > 30:
             break
-    if not xlsx:
-        raise SystemExit(__doc__)
+    ncols_found.add(n)
+check(ncols_found == {COLS},
+      f"每行 {COLS} 格（格宽 {CELL_PX}px）",
+      f"列数不对：{sorted(ncols_found)}（应为 {COLS}）")
 
-    if ARG.get("--file"):
-        f = ARG["--file"]
-        src = open(f if f.startswith("/") else os.path.join(ROOT, f), encoding="utf-8").read()
-    else:
-        src = ARG.get("--chars", "")
-    items = [(i, h) for _, lst in P.parse_items(src) for i, h in lst]
-    if not items:
-        raise SystemExit("✗ 需要 --chars 或 --file 提供音节清单，否则无法反查")
-    bad = P.validate(items)
-    if bad:
-        raise SystemExit(f"✗ 非法音节：{bad}")
+# ── ③/④ 贴图：位置、尺寸、内容、角色 ──
+imgs = {}
+for im in ws._images:
+    fr = im.anchor._from
+    imgs.setdefault(fr.row, []).append((fr.col, fr.colOff, fr.rowOff,
+                                        im.anchor.ext.cx, im.anchor.ext.cy, im))
 
-    geo = RP.band_geometry(int(ARG.get("--band-px", "30")), int(ARG.get("--bands", "3")),
-                           int(ARG.get("--cols", "8")), int(ARG.get("--inset-x", "4")))
-    n_trace = int(ARG.get("--trace-times", "2"))
-    font = RP.find_font(P.needed_chars(items), ARG.get("--font"))
+EMU_PX = 9525
+ok_pos = ok_role = True
+roles = {}
+for bi, r in enumerate(band_rows):
+    it, hz = ITEMS[bi]
+    got = {c: (off_c, off_r, cx, cy, im) for c, off_c, off_r, cx, cy, im in imgs.get(r - 1, [])}
+    for k in range(COLS):
+        if k > N_TRACE:
+            if k in got:
+                ok_pos = False
+            continue
+        if k not in got:
+            ok_pos = False
+            continue
+        off_c, off_r, cx, cy, im = got[k]
+        if off_r != 0 or abs(cy - BOX_H * EMU_PX) > EMU_PX or abs(cx - BOX_W * EMU_PX) > EMU_PX:
+            ok_pos = False
+        # 内容反查：示范还是描红？
+        arr = np.asarray(Image.open(im.ref).convert("RGBA"))
+        want_model = np.asarray(INTENT[it]["model"])
+        want_trace = np.asarray(INTENT[it]["trace"])
+        if arr.shape != want_model.shape:
+            ok_role = False
+            continue
+        if np.array_equal(arr, want_model):
+            roles.setdefault(bi, []).append((k, "model"))
+        elif np.array_equal(arr, want_trace):
+            roles.setdefault(bi, []).append((k, "trace"))
+        else:
+            ok_role = False
+check(ok_pos,
+      f"全部贴图纵向零偏移、高度 {BOX_H}px = 三行子行之和、宽 {BOX_W}px，且没有多余的图",
+      "有贴图位置/尺寸不对，或超出描红范围的格子里有图")
+okm = all(roles.get(bi) and roles[bi][0][1] == "model" for bi in range(len(band_rows)))
+okt = all(sorted(k for k, ro in roles.get(bi, [])) == list(range(N_TRACE + 1))
+          and all(ro == "trace" for k, ro in roles[bi][1:]) for bi in range(len(band_rows)))
+check(ok_role and okm and okt,
+      f"全部 {len(band_rows)} 格行按像素反查命中：首格示范黑 + {N_TRACE} 格描红灰",
+      "有格子贴错了图（角色不符 / 顺序不对 / 内容对不上渲染意图）")
 
-    check_xlsx(xlsx, items, geo, n_trace, font)
-    pdf = ARG.get("--pdf")
-    if pdf:
-        check_pdf(pdf if pdf.startswith("/") else os.path.join(ROOT, pdf),
-                  items, geo, n_trace, font)
+# ── ⑤ 标签行 ──
+okl = True
+for bi, r in enumerate(band_rows):
+    v = ws.cell(row=r - 1, column=1).value
+    if not v or ITEMS[bi][0] not in str(v):
+        okl = False
+check(okl, "每个四线格上方的标签行都写着对应音节", "有标签行不含对应音节")
 
-    print()
-    if FAIL:
-        print(f"❌ 拼音字帖验收未通过：{len(FAIL)} 项")
-        for m in FAIL:
-            print(f"  · {m}")
-        sys.exit(1)
-    print("✅ 拼音字帖验收通过（三带等高 / 贴图对齐 / 落带正确 / 严格三等分）")
+if fails:
+    print(f"\n✗ xlsx 验收未通过（{len(fails)} 项）")
+    sys.exit(1)
+print("  ✓ xlsx 通过")
+
+# ================================================================ PDF
+if not PDF or not os.path.exists(PDF):
+    print("\n（未提供 --pdf，跳过 PDF 层验收）")
+    print("\n✅ 拼音字帖验收通过（xlsx 层）")
+    sys.exit(0)
+
+print(f"\n=== PDF 真实像素 ===  {os.path.basename(PDF)}")
+import pymupdf
+
+DPI = 200
+SCALE = DPI / 96.0
+doc = pymupdf.open(PDF)
+
+
+def _line_kind(green_row):
+    """一条横线是实线还是虚线：数绿色段的个数。"""
+    seg = green_row.astype(int)
+    return int((seg[1:] & ~seg[:-1]).sum())
+
+
+def page_bands(a, green):
+    """把一页里的绿线切成一个个四线格。
+
+    每带固定是 [实, 虚, 虚, 实] 四条线 —— 按这个模式切，不靠「带间距比带内
+    线距大」这种假设（标签行 + 间隔行只比一条带宽窄一点，按间隙分组必错）。
+    """
+    H, W = green.shape
+    # 阈值 50%：实线覆盖率 ~92%，虚线因为有间隙只有 ~60% —— 阈值太高会把虚线整条丢掉
+    rowcov = green.sum(axis=1)
+    rows = [y for y in range(H) if rowcov[y] > W * 0.5]
+    lines = []
+    for y in rows:
+        if lines and y - lines[-1][0] <= 4:
+            lines[-1] = (y, _line_kind(green[y]))          # 同一条线的抗锯齿行
+        else:
+            lines.append((y, _line_kind(green[y])))
+    kinds = ["solid" if k < 5 else "dash" for _, k in lines]
+    bands = []
+    i = 0
+    while i + 3 < len(lines):
+        if [kinds[i], kinds[i + 1], kinds[i + 2], kinds[i + 3]] == ["solid", "dash", "dash", "solid"]:
+            bands.append((lines[i][0], lines[i + 1][0], lines[i + 2][0], lines[i + 3][0]))
+            i += 4
+        else:
+            i += 1
+    return bands
+
+
+all_bands = []
+for pno in range(len(doc)):
+    pix = doc[pno].get_pixmap(dpi=DPI)
+    a = np.frombuffer(pix.samples, dtype=np.uint8).reshape(
+        pix.height, pix.width, pix.n)[..., :3].astype(int)
+    r_, g_, b_ = a[..., 0], a[..., 1], a[..., 2]
+    green = (g_ > 180) & (g_ - r_ > 15) & (g_ - b_ > 15)
+    for ys4 in page_bands(a, green):
+        all_bands.append({"page": pno, "img": a, "green": green, "rows": list(ys4)})
+check(len(all_bands) == len(ITEMS),
+      f"{len(doc)} 页共 {len(all_bands)} 个四线格",
+      f"PDF 里四线格数量 {len(all_bands)} != {len(ITEMS)}")
+
+# ── ① 三等分 + 实虚模式 ──
+oktri = True
+for bd in all_bands:
+    d = np.diff(bd["rows"])
+    if max(d) - min(d) > 3:                       # 200dpi 下 3px
+        oktri = False
+check(oktri, "虚线严格三等分（≤3px@200dpi）", "有四线格的虚线没把绿线三等分")
+
+# ── ② 竖分隔线 ──
+def vlines_of(bd):
+    """量这个四线格的竖分隔线位置（测出来的，不是算出来的）。"""
+    gr = bd["green"]
+    ys = bd["rows"]
+    colcov = gr[ys[0] + 2:ys[3] - 2].sum(axis=0)
+    vcols = [x for x in range(gr.shape[1]) if colcov[x] > (ys[3] - ys[0] - 4) * 0.7]
+    vg = []
+    for x in vcols:
+        if not vg or x - vg[-1][-1] > 4:
+            vg.append([x])
+        else:
+            vg[-1].append(x)
+    return [int(np.mean(g_)) for g_ in vg]
+
+
+okv = True
+for bd in all_bands:
+    vxs = vlines_of(bd)
+    if len(vxs) != COLS + 1 or np.diff(vxs).std() > 6:
+        okv = False
+check(okv, f"竖分隔线每行 {COLS + 1} 根、间距均匀（格宽 ≈ {CELL_PX}px）",
+      "竖分隔线数量或间距不对")
+
+# ── ③ 墨迹落带 + 示范/描红深浅 ──
+okink = okcol = True
+n_cells = 0
+for bi, bd in enumerate(all_bands):
+    if bi >= len(ITEMS):
+        break
+    it, hz = ITEMS[bi]
+    a = bd["img"]
+    y0, y1 = bd["rows"][0], bd["rows"][3]
+    vxs = vlines_of(bd)
+    if len(vxs) != COLS + 1:
+        okink = False
+        continue
+    green = bd["green"]
+    ink = (a.sum(axis=2) < 700) & ~green
+    for k in range(N_TRACE + 1):
+        x0, x1 = vxs[k] + 4, vxs[k + 1] - 4
+        cell = ink[y0 + 2:y1 - 2, x0:x1]
+        if not cell.any():
+            okink = False
+            continue
+        yy = np.flatnonzero(cell.any(axis=1))
+        want = INTENT[it]["model"] if k == 0 else INTENT[it]["trace"]
+        # 意图侧用 alpha>40（看得见的墨），不能用 alpha>0 —— LANCZOS 的半透明
+        # 羽边在 PDF 里渲染成接近白色，两侧口径不一致就会永远差几像素
+        wa = np.asarray(want)[..., 3] > 40
+        wy = np.flatnonzero(wa.any(axis=1))
+        # yy/wy 都是各自切片内的相对行号；切片顶 = 带上沿，意图图顶 = 贴图顶 = 同一处
+        if abs(yy.min() - wy.min() * SCALE) > 5 or \
+           abs(yy.max() - wy.max() * SCALE) > 5:
+            okink = False
+        px = a[y0 + 2:y1 - 2, x0:x1][cell]
+        mean = px.mean()
+        if (k == 0 and not mean < 120) or (k > 0 and not mean > 150):
+            okcol = False
+        n_cells += 1
+check(okink,
+      f"{n_cells} 个格子的墨迹位置与渲染意图一致（≤5px@200dpi，含声调进上带/降部进下带）",
+      "有格子的墨迹位置与渲染意图不一致")
+check(okcol, "首格墨色深（示范）、其余格墨色浅（描红）", "示范/描红的深浅不对")
+
+if fails:
+    print(f"\n✗ 拼音字帖验收未通过（{len(fails)} 项）")
+    sys.exit(1)
+print("\n✅ 拼音字帖验收通过（三带等高 / 贴图对齐 / 逐格内容与角色 / 严格三等分 / 落带正确）")
+sys.exit(0)

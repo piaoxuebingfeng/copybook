@@ -123,8 +123,13 @@ def validate(items):
 
 
 def needed_chars(items):
-    """这些条目要用到哪些字符（用于校验字体覆盖）。"""
+    """这些条目要用哪些字符来校验**拼音字体**覆盖。
+
+    只算音节字母，不算汉字注记：汉字是 Excel 单元格文字（由黑体渲染），
+    拼音专用字体（如 汉语拼音.ttf）只有拉丁与声调 —— 把汉字算进来会
+    恰好把最合适的字体拒掉。
+    """
     s = set()
-    for it, hz in items:
-        s |= set(it) | set(hz)
+    for it, _hz in items:
+        s |= set(it)
     return s

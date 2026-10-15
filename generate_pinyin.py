@@ -1,25 +1,29 @@
-"""拼音字帖的 Excel 排版 —— A4 纵向，**一行一个音节（四线三格）**。
+"""拼音字帖的 Excel 排版 —— A4 纵向，**一方格一个音节**（参考 Copybook 工程的格式）。
 
-排版结构（每个音节一块）：
-    标签行         【组名】　bā　八
-    上带   ┐
-    中带   ├ 四线三格（3 个子行，每条带 1 个子行）
-    下带   ┘
+排版结构（每个音节占一行格子）：
+    标签行       【组名】　bā　八
+    四线三格     [首格·黑色示范] [描红格·浅灰] × N [留白格…]
     间隔行
 
 四线三格用**原生 Excel 边框**画（和汉字字帖的田字格一样，不合并单元格）：
-上下两条绿实线是外框，中间两条灰虚线是辅助线。音节的描红图贴在上面，
-贴图高度正好等于 3 个子行之和、纵向不内缩 —— 这样图里的带界和 Excel 的虚线
-严格重合，字母才会真的坐在带上。
+上下两条浅绿实线、中间两条更浅的虚线、每格之间一条竖实线 —— 线色取自参考
+工程成品的实测值。首格是黑色示范，其余格浅灰描红（默认整行描红，--trace-times
+可减少，留白格给孩子自己写）。
 
-v1 **一行一个音节**而不是「一个方格一个音节」：`zhuāng` 这种 6 个字母的音节在
-2.38cm 的方格里放不下，硬塞就得缩小字号，字母一缩就不在带上了。
+格宽**按最长音节自适应**：先用「x-height = 一条带」反解字号、量出最长音节的
+墨迹宽度，格宽 = max(最小格宽, 最长墨迹 + 边距)，列数 = floor(总宽/格宽)。
+于是 `zhuāng`（6 字母）会把格加宽、列数变少，但字号**绝不缩** —— 缩字号字母
+就不在带上了，这是四线三格的硬约束，比「格子整齐」重要。
+
+贴图仍然遵守 v1 的硬不变量：**纵向零内缩、高度正好等于三行子行之和**，
+图里的带界才会和 Excel 画的虚线严格重合。
 """
 import os
 import sys
 
 from openpyxl import Workbook
-from openpyxl.styles import Font, Alignment
+from openpyxl.styles import Alignment, Border, Font, Side
+from openpyxl.utils import get_column_letter
 
 import pinyin_input as P
 import render_pinyin as RP
@@ -34,25 +38,15 @@ for _a in sys.argv[1:]:
         ARG[_k] = _v if _sep else "1"
 
 MARGIN_CM = 0.8
-# 几何取自 render_pinyin.band_geometry —— 渲染和排版共用同一份，
-# 否则图里的带界会和 Excel 画的虚线错开，字母整条带地偏
-GEO = RP.band_geometry(int(ARG.get("--band-px", "30")),
-                       int(ARG.get("--bands", "3")),
-                       int(ARG.get("--cols", "8")),
-                       int(ARG.get("--inset-x", "4")))
-BANDS = GEO["bands"]
-BAND_PX = GEO["band"]
-GRID_PX = GEO["grid_px"]
-BOX_W, BOX_H, INSET_X = GEO["box_w"], GEO["box_h"], GEO["inset_x"]
-BAND_CM = BAND_PX / 96 * 2.54
-GRID_CM = GRID_PX / 96 * 2.54    # 一行四线格的总宽（文字自检要用宽度，不是带高）
-SUB_ROW_PT = S.snap_up_pt(GEO["band_px"] * 72 / 96)   # 子行高 = 整数像素，过 0.75pt 量化
-COL_W = S.col_width_for_px(GRID_PX, ARG.get("--mode", "excel"))
-N_TRACE = int(ARG.get("--trace-times", "2"))
+
+# 四线三格线色（参考工程 Copybook 成品实测；比汉字田字格的深绿更浅、更像课本）
+LINE_SOLID = "92E892"      # 上下边线 + 竖分隔线
+LINE_DASH = "CAF1CA"       # 中间两条辅助虚线
+SOLID = Side(style="thin", color=LINE_SOLID)
+DASHM = Side(style="dashed", color=LINE_DASH)
 
 TITLE_PT, INFO_PT, HINT_PT, HDR_SPACER_PT = 26, 16, 16, 5
 LABEL_PT, ITEM_SPACER_PT = 16, 6
-ITEM_PT = LABEL_PT + BANDS * SUB_ROW_PT + ITEM_SPACER_PT
 
 TITLE = ARG.get("--title", "幼小衔接 · 拼音字帖")
 SUBTITLE = ARG.get("--subtitle",
@@ -62,7 +56,7 @@ OUT = OUT if OUT.startswith("/") else f"{ROOT}/{OUT}"
 IMG_DIR = ARG.get("--images", "pinyin_images")
 IMG_DIR = IMG_DIR if IMG_DIR.startswith("/") else f"{ROOT}/{IMG_DIR}"
 FONT = ARG.get("--font") or None
-UNIT = ARG.get("--unit", "行")             # 一个音节的练习单位，用于文案
+MODE = ARG.get("--mode", "excel")
 
 CHARS_ARG = ARG.get("--chars", "")
 FILE_ARG = ARG.get("--file", "")
@@ -83,11 +77,45 @@ if _bad:
                      + "、".join(_bad)
                      + "\n  音节只能由字母和带调的元音组成（声调可写 ba1/ma3/ma5）。")
 
+# ── 几何：与渲染阶段同一份 cell_plan（确定性重算），并与 plan.json 互相印证 ──
 FONT_PATH = RP.find_font(P.needed_chars([(i, h) for i, h, _ in FLAT]), FONT)
+GEO = RP.cell_plan([i for i, _, _ in FLAT], FONT_PATH,
+                   int(ARG.get("--band-px", "30")),
+                   int(ARG.get("--bands", "3")),
+                   int(ARG.get("--grid-px", "720")),
+                   int(ARG.get("--inset-x", "4")))
+BANDS, BAND_PX, CELL_PX, COLS = GEO["bands"], GEO["band"], GEO["cell_px"], GEO["cols"]
+GRID_PX, BOX_W, BOX_H, INSET_X = GEO["grid_px"], GEO["box_w"], GEO["box_h"], GEO["inset_x"]
+BAND_CM = BAND_PX / 96 * 2.54
+GRID_CM = GRID_PX / 96 * 2.54
+SUB_ROW_PT = S.snap_up_pt(GEO["band_px"] * 72 / 96)
+ITEM_PT = LABEL_PT + BANDS * SUB_ROW_PT + ITEM_SPACER_PT
+COL_W = S.col_width_for_px(CELL_PX, MODE)
+
+# 描红格数：默认整行（首格示范之外全描），--trace-times=N 只描 N 格
+_tt = ARG.get("--trace-times", "full")
+N_TRACE = COLS - 1 if _tt == "full" else max(0, min(int(_tt), COLS - 1))
+
+
+def _check_plan_consistency():
+    """排版算出的几何必须和渲染阶段写下的完全一致 —— 差一个数带界就错位。"""
+    p = os.path.join(IMG_DIR, "plan.json")
+    if not os.path.exists(p):
+        return
+    import json
+    with open(p, encoding="utf-8") as fh:
+        saved = json.load(fh)
+    if saved.get("geometry") != GEO:
+        raise SystemExit("✗ 渲染阶段与排版阶段的几何不一致！\n"
+                         f"  渲染: {saved.get('geometry')}\n  排版: {GEO}\n"
+                         "  通常是两次运行之间字体或参数变了 —— 请重跑 render_pinyin。")
+
+
+_check_plan_consistency()
 
 
 def slug(text):
-    """音节 -> 文件名。声调字符不进文件名，改用码点，避免各种文件系统编码问题。"""
+    """音节 -> 文件名。声调字符不进文件名，改用码点，避免文件系统编码问题。"""
     return "_".join(f"{ord(c):04x}" for c in text)
 
 
@@ -97,13 +125,15 @@ def build():
     ws.title = "拼音字帖"
     ws.sheet_view.showGridLines = False
     S.setup_page(ws, "portrait", MARGIN_CM)
-    ws.column_dimensions["A"].width = COL_W
+    for c in range(COLS):
+        ws.column_dimensions[get_column_letter(c + 1)].width = COL_W
 
     avail = GRID_CM
     r = 1
     t = ws.cell(row=r, column=1, value=TITLE)
     t.font = Font(name="黑体", size=18, bold=True)
     t.alignment = Alignment(horizontal="center", vertical="center")
+    ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=COLS)
     S.check_text_width(TITLE, 18, r, avail)
     ws.row_dimensions[r].height = TITLE_PT
     r += 1
@@ -139,16 +169,17 @@ def build():
         lab_row = r
         r += 1
 
-        # 四线三格：三条带 = 三个子行；上下绿实线，中间两条灰虚线
+        # 四线三格：3 个子行 × COLS 列。上下浅绿实线、中间浅虚线、每格之间竖实线
         band_row = r
         for b in range(BANDS):
             rr = band_row + b
             ws.row_dimensions[rr].height = SUB_ROW_PT
-            cell = ws.cell(row=rr, column=1)
-            top = S.OUTER if b == 0 else None
-            bottom = S.OUTER if b == BANDS - 1 else S.DASH
-            from openpyxl.styles import Border
-            cell.border = Border(top=top, bottom=bottom)
+            for c in range(COLS):
+                ws.cell(row=rr, column=c + 1).border = Border(
+                    top=SOLID if b == 0 else None,
+                    bottom=SOLID if b == BANDS - 1 else DASHM,
+                    left=SOLID if c == 0 else None,
+                    right=SOLID)
         r += BANDS
 
         ws.row_dimensions[r].height = ITEM_SPACER_PT
@@ -159,52 +190,46 @@ def build():
     return wb, ws, r, blocks, pages
 
 
-def load_manifest():
-    """读渲染阶段写的 plan.json —— 里面是**实际画出的描红遍数**。
-
-    音节太长时一遍都放不下（或只放得下 1 遍），排版必须照实回报，
-    不能想当然地写 N_TRACE。
-    """
-    import json
-    p = os.path.join(IMG_DIR, "plan.json")
-    if not os.path.exists(p):
-        return {}
-    with open(p, encoding="utf-8") as fh:
-        return json.load(fh).get("items", {})
-
-
 def place(ws, blocks):
-    """把描红图贴上去，返回每个音节 (音节, 汉字, 实际描红遍数)。"""
-    man = load_manifest()
-    plans, missing = [], []
+    """贴图：首格黑示范，随后 N 格浅灰描红。返回 (音节, 汉字, 实际贴了几格)。"""
+    placed = []
+    missing = []
     for b in blocks:
         it = b["item"]
-        src = os.path.join(IMG_DIR, slug(it) + ".png")
-        info = man.get(slug(it), {})
-        drawn = int(info.get("drawn", 0))
-        if os.path.exists(src):
+        model = os.path.join(IMG_DIR, slug(it) + ".png")
+        trace = os.path.join(IMG_DIR, slug(it) + "_t.png")
+        n = 0
+        if os.path.exists(model):
             # 纵向 0 内缩：贴图高度正好等于三行子行之和，带界才能和虚线重合
-            S.place_image(ws, src, 0, b["band_row"] - 1, BOX_W, BOX_H, INSET_X, 0)
+            S.place_image(ws, model, 0, b["band_row"] - 1, BOX_W, BOX_H, INSET_X, 0)
+            n += 1
+            for k in range(1, N_TRACE + 1):
+                if os.path.exists(trace):
+                    S.place_image(ws, trace, k, b["band_row"] - 1, BOX_W, BOX_H,
+                                  INSET_X, 0)
+                    n += 1
         else:
             missing.append(it)
-        plans.append((it, b["hanzi"], drawn))
+        placed.append((it, b["hanzi"], n))
     if missing:
-        print(f"  ⚠ 以下音节没有描红图，已留白：{''.join(missing)}")
-    return plans
+        print(f"  ⚠ 以下音节没有贴图，已留白：{''.join(missing)}")
+    return placed
 
 
 if __name__ == "__main__":
     wb, ws, last_row, blocks, pages = build()
-    plans = place(ws, blocks)
-    S.set_print_area(ws, 1, last_row)
+    placed = place(ws, blocks)
+    S.set_print_area(ws, COLS, last_row)
     wb.save(OUT)
     print(f"已生成 {OUT}")
-    print(f"  音节 {len(blocks)} 个　共 {pages} 页　末行 {last_row}"
-          f"　每页最多 {int(((29.7-2*MARGIN_CM)/2.54*72) // ITEM_PT)} 个")
-    print(f"  四线三格：一条带 {GEO['band_px']}px，共 {BAND_PX}px = {BAND_CM:.4f}cm；"
-          f"子行高 {SUB_ROW_PT}pt；总宽 {GRID_PX}px = {GRID_PX/96*2.54:.2f}cm")
-    print(f"  字体 {os.path.basename(FONT_PATH)}　每音节描红 {N_TRACE} 遍")
-    for it, hz, drawn in plans:
-        print(f"    {it}　{hz}　-> 描红 {drawn} 遍 + 留白")
+    print(f"  音节 {len(blocks)} 个　共 {pages} 页　每行 {COLS} 格"
+          f"（格宽 {CELL_PX}px = {CELL_PX/96*2.54:.2f}cm，"
+          f"每音节 = 首格示范 + {N_TRACE} 格描红 + {COLS-1-N_TRACE} 格留白）")
+    print(f"  四线三格：一条带 {GEO['band_px']}px，格高 {BAND_PX}px = {BAND_CM:.4f}cm；"
+          f"子行高 {SUB_ROW_PT}pt；总宽 {GRID_PX}px = {GRID_CM:.2f}cm")
+    print(f"  字体 {os.path.basename(FONT_PATH)}")
+    print(f"  线色 实线#{LINE_SOLID} 虚线#{LINE_DASH}（参考工程实测值）")
+    for it, hz, n in placed:
+        print(f"    {it}　{hz}　-> {n} 格")
     for w in S.TEXT_WARNINGS:
         print(f"  ⚠ {w}")

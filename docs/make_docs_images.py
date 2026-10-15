@@ -244,48 +244,70 @@ def main():
         crop.save(p, optimize=True)
         made.append(p)
 
-    # ---------- 3c. 拼音字帖：四线三格与「落带」 ----------
+    # ---------- 3c. 拼音字帖：一方格一个音节（首格示范 + 描红 + 落带） ----------
     # 两个例子**跨页按内容找**：第一页的音节（bā mā bà mǎ dà tǔ mǐ nǚ）碰巧都没有降部，
     # 所以"降部进下格"的例子要到第二页（shàng 的 g）才有。按行号写死就会选错。
     PY = "output/示例_拼音/示例_拼音.pdf"
     if os.path.exists(os.path.join(ROOT, PY)):
+        def solid_lines(imp):
+            """只认**实线**（整行覆盖率 ≥80%）：虚线有间隙，覆盖率只有 ~60%。
+
+            用旧版 green_lines 的判据在这里恰好踩边缘（浅绿虚线 241 vs 242 差 1，
+            时灵时不灵）—— 换成覆盖率判据，实虚之分是结构性的，不靠色值巧合。
+            """
+            a = np.asarray(imp).astype(int)
+            R_, G_, B_ = a[..., 0], a[..., 1], a[..., 2]
+            green = (G_ > 180) & (G_ - R_ > 15) & (G_ - B_ > 15)
+            rowcov = green.sum(axis=1)
+            idx = np.flatnonzero(rowcov > 0.8 * a.shape[1])
+            if idx.size == 0:
+                return []
+            groups = [[idx[0]]]
+            for v in idx[1:]:
+                (groups[-1].append(v) if v - groups[-1][-1] <= 3
+                 else groups.append([v]))
+            return [float(np.mean(g)) for g in groups]
+
         want = ["up", "down"]
         found = {}
         for pg in (1, 2):
             imp = render(PY, pg, 420)
-            pylines = green_lines(imp, px_cm)
             a = np.asarray(imp).astype(int)
             R_, G_, B_ = a[..., 0], a[..., 1], a[..., 2]
-            pinkmask = ((abs(R_ - 232) < 45) & (abs(G_ - 192) < 45)
-                        & (abs(B_ - 192) < 45) & (R_ > G_ + 10))
-            for bi in range(len(pylines) // 2):
+            greenmask = (G_ > 180) & (G_ - R_ > 15) & (G_ - B_ > 15)
+            inkmask = (a.sum(axis=2) < 690) & ~greenmask   # 黑示范 + 灰描红都算墨
+            lines = solid_lines(imp)
+            for i in range(len(lines) - 1):
                 if not want:
                     break
-                top = pylines[bi * 2] * px_cm
-                bot = pylines[bi * 2 + 1] * px_cm
-                hh = bot - top
-                rr = np.flatnonzero(pinkmask[int(top):int(bot) + 1].any(axis=1))
+                top, bot = lines[i], lines[i + 1]
+                h = bot - top
+                if h < 2.0 * px_cm or h > 3.0 * px_cm:    # 一个四线格 ≈ 2.38cm
+                    continue
+                rr = np.flatnonzero(inkmask[int(top):int(bot) + 1].any(axis=1))
                 if not rr.size:
                     continue
-                if "up" in want and rr.min() < hh / 3:
+                if "up" in want and rr.min() < h / 3:
                     want.remove("up"); found["up"] = (imp, top, bot)
-                elif "down" in want and rr.max() > 2 * hh / 3 + 4:
+                elif "down" in want and rr.max() > 0.75 * h:
+                    # 0.75h 才算真降部（~0.82）；基线圆弧超出只到 ~0.69 ——
+                    # 用 2h/3+4px 的松阈值会把无降部音节误当成降部例
                     want.remove("down"); found["down"] = (imp, top, bot)
 
         def annotate_bands(im, top_px, bot_px):
-            """在带内右侧空白处标出三条带各放什么。字号随带高走，否则在 20cm 宽图里看不见。"""
-            d = ImageDraw.Draw(im)
+            """右侧加一条白边标三条带各放什么 —— 整行都是格子，没有空位可叠字。"""
+            strip = int(3.4 * px_cm)
+            wide = Image.new("RGB", (im.width + strip, im.height), (255, 255, 255))
+            wide.paste(im, (0, 0))
+            d = ImageDraw.Draw(wide)
             h = bot_px - top_px
-            f = font(int(h * 0.19))
+            f = font(int(h * 0.20))
             for i, txt in enumerate(("上格 · 升部与声调", "中格 · 字母主体", "下格 · 降部")):
                 cy = top_px + h * (i + 0.5) / 3
                 tw = d.textlength(txt, font=f)
-                x = im.width - tw - int(h * 0.5)
-                d.rounded_rectangle([x - 16, cy - h * 0.14, x + tw + 16, cy + h * 0.14],
-                                    radius=12, fill=(255, 255, 255),
-                                    outline=(198, 204, 212), width=3)
-                d.text((x, cy - h * 0.10), txt, font=f, fill=INK)
-            return im
+                x = im.width + (strip - tw) / 2
+                d.text((x, cy - h * 0.11), txt, font=f, fill=INK)
+            return wide
 
         crops = []
         for key in ("up", "down"):
@@ -303,9 +325,9 @@ def main():
             yy = 0
             for c in crops:
                 total.paste(c, (0, yy)); yy += c.height + gap
-            crop = with_title(total, "④ 拼音字帖：四线三格（--type=pinyin）",
-                              "字母主体写在中格，升部与声调进上格、降部进下格 —— 字号由 x-height "
-                              "反解、基线锚在中格下沿，所以一定落在正确的带上"
+            crop = with_title(total, "④ 拼音字帖：一方格一个音节（--type=pinyin）",
+                              "首格黑色示范、其余浅灰描红，字母主体写在中格、升部与声调在上格、"
+                              "降部进下格 —— 格宽按最长音节自适应，字号绝不缩"
                               "（两张图是自动挑出来的：一张有声调、一张有降部）")
             p = os.path.join(OUT, "zoom-pinyin.png")
             crop.save(p, optimize=True)

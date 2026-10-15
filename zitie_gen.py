@@ -95,13 +95,17 @@ HELP = """
   -h, --help               显示本帮助
 
 拼音字帖（--type=pinyin）：
-  一行一个音节，A4 纵向，四线三格（一条带 0.79cm，共 2.38cm）。
+  一方格一个音节，A4 纵向，四线三格（一条带 0.79cm，格高 2.38cm）。
+  每个音节占一行格子：首格是黑色示范，其余格浅灰描红（默认整行描红）。
   字母主体写在中格、升部与声调在上格、降部在下格 —— 字号由 x-height 反解，
   基线锚在中格下沿，所以字母一定坐在正确的带上。
+  格宽按最长音节自适应（zhuāng 也放得下），但字号绝不缩 —— 缩了字母就掉出带。
   音节直接给，不查词典：既能写带调字符 `bā`，也能用数字标调 `ba1`。
   --chars="bā 八 / mā 妈 / bà 爸"    一行一个音节，可跟一个汉字标注
-  --font=路径              指定字体（默认自动探测：fonts/ -> 楷体 -> AR PL UKai -> Noto CJK）
-  --trace-times=2          每个音节描红几遍（默认 2），其余留白
+  --font=路径              指定字体（默认自动探测：fonts/ 里带「拼音」的优先，
+                           然后系统楷体 -> AR PL UKai -> Noto CJK；无拼音专用字体时
+                           自动把双层的 g 换成单层教学形 ɡ）
+  --trace-times=full       首格示范后描红几格（默认 full = 整行都描），其余留白
 
 例子：
   python3 zitie_gen.py --type=pinyin "bā 八 / mā 妈 / bà 爸" --name=拼音练习
@@ -129,7 +133,7 @@ def parse_args(argv):
         "stroke_order": False,   # 田字格里逐格练笔顺
         "type": "hanzi",         # hanzi=汉字笔顺字帖；pinyin=四线三格拼音字帖
         "font": "",              # 拼音字帖用哪个字体（留空则自动探测）
-        "trace_times": "2",      # 拼音：每个音节描红几遍
+        "trace_times": "full",   # 拼音：首格示范后描红几格（full=整行描红）
     }
     if any(a in ("-h", "--help", "help") for a in argv):
         print(HELP)
@@ -160,11 +164,11 @@ def _strip_cells(o):
 
 
 def main_pinyin(o):
-    """拼音字帖：一行一个音节（四线三格），A4 纵向。"""
+    """拼音字帖：一方格一个音节（四线三格），A4 纵向。"""
     import pinyin_input as P
 
     if o["layout"] != "a5" or o["orient"] != "portrait":
-        print("⚠ 拼音字帖固定 A4 纵向（一行一个音节），--layout / --orient 本次忽略")
+        print("⚠ 拼音字帖固定 A4 纵向（一方格一个音节），--layout / --orient 本次忽略")
     spec = o["spec"]
     if o["file"]:
         if not os.path.exists(o["file"]):
