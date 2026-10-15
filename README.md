@@ -232,6 +232,10 @@ python3 zitie_gen.py --help
 # 音节后面可以跟一个汉字做标注
 python3 zitie_gen.py --type=pinyin "bā 八 / mā 妈 / bà 爸 / mǎ 马"
 python3 zitie_gen.py --type=pinyin --file=音节表示例.txt --name=拼音练习
+
+# 全部 407 个基础音节 × 实际存在的声调（1462 个）都在 拼音音节总表.txt 里，
+# 当底稿裁剪出要练的声母/声调，或直接全量生成（约 209 页）
+python3 zitie_gen.py --type=pinyin --file=拼音音节总表.txt --name=拼音总表
 ```
 
 音节表格式和字表一样，支持 `组名:` 分组：
@@ -408,6 +412,7 @@ python3 verify_stroke_order.py output/示例_笔顺练习
 ├── verify_strips.py      验收：教学条是否被裁切
 │
 ├── sheet_layout.py       共享版面层（纸张几何 / 列宽标定 / 贴图 / 文字自检）
+├── 拼音音节总表.txt       普通话全部音节 × 声调的全量音节表（407 基础 / 1462 带调）
 ├── pinyin_input.py       拼音音节解析（数字标调 / 合法性校验）
 ├── render_pinyin.py      拼音渲染（字体探测 + 单层 g 兜底 + 单格渲染 + 自适应格宽）
 ├── generate_pinyin.py    拼音排版（一方格一音节：示范/描红贴图 + 按块高分页）

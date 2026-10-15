@@ -1,0 +1,475 @@
+# 拼音音节总表 —— 普通话全部音节 × 声调（407 个基础音节 / 1462 个带调音节）
+#
+# 这是「音节表文件」的全量版：拿它直接生成字帖，或当底稿裁剪出你要的子集。
+#
+# 内容怎么来的：从 pinyin-pro 词典（MIT）的真实词表里提取「实际存在的
+# 音节+声调组合」，再用本工具的校验器交叉验证 —— 不是机械穷举声母×韵母×
+# 声调，所以 biě、zhuàng 这类「拼得出但无字」的组合不会出现；nǚ 只有
+# 实际存在的声调。规模与《新华字典》式普通话音节总表一致（约 400 个
+# 基础音节）。叹词 ńg/ǹg/ḿ 被校验器排除（幼儿字帖用不上）。
+#
+# 排版约定：
+#   · 一行 = 一个基础音节的全部实际声调（按 1 2 3 4 排，轻声在最后不标调号）
+#   · 行首组名 = 声母（会印在字帖每行的标签里，如【声母 b】 bā）
+#   · 想加汉字标注：把 "bā bá bǎ bà" 改成 "bā 八 bá 拔 bǎ 把 bà 爸"
+#   · 声调也可以写成数字：bā = ba1、nǚ = nv3（编辑时不用找特殊字符）
+#
+# 用法：
+#   python3 zitie_gen.py --type=pinyin --file=拼音音节总表.txt --name=拼音总表
+#   （全量 1462 行，约 209 页 —— 建议先裁剪：练哪几个声母
+#    就留哪几节，或每行只留要练的声调；删行 / 加 # 注释掉都行）
+
+# ── 声母 b（16 个基础音节 / 65 个带调音节）──
+声母 b: bā bá bǎ bà ba
+声母 b: bāi bái bǎi bài bai
+声母 b: bān bǎn bàn ban
+声母 b: bāng bǎng bàng
+声母 b: bāo báo bǎo bào bao
+声母 b: bēi běi bèi bei
+声母 b: bēn běn bèn
+声母 b: bēng béng běng bèng
+声母 b: bī bí bǐ bì
+声母 b: biān biǎn biàn bian
+声母 b: biāo biáo biǎo biào
+声母 b: biē bié biě biè
+声母 b: bīn bìn
+声母 b: bīng bǐng bìng bing
+声母 b: bō bó bǒ bò bo
+声母 b: bū bú bǔ bù bu
+
+# ── 声母 p（17 个基础音节 / 71 个带调音节）──
+声母 p: pā pá pà pa
+声母 p: pāi pái pǎi pài pai
+声母 p: pān pán pǎn pàn pan
+声母 p: pāng páng pǎng pàng pang
+声母 p: pāo páo pǎo pào pao
+声母 p: pēi péi pèi
+声母 p: pēn pén pěn pèn pen
+声母 p: pēng péng pěng pèng peng
+声母 p: pī pí pǐ pì pi
+声母 p: piān pián piǎn piàn
+声母 p: piāo piáo piǎo piào
+声母 p: piē piě piè
+声母 p: pīn pín pǐn pìn
+声母 p: pīng píng
+声母 p: pō pó pǒ pò po
+声母 p: pōu póu pǒu
+声母 p: pū pú pǔ pù
+
+# ── 声母 m（19 个基础音节 / 71 个带调音节）──
+声母 m: mā má mǎ mà ma
+声母 m: mái mǎi mài mai
+声母 m: mān mán mǎn màn man
+声母 m: māng máng mǎng mang
+声母 m: māo máo mǎo mào mao
+声母 m: mē me
+声母 m: méi měi mèi mei
+声母 m: mēn mén mèn men
+声母 m: mēng méng měng mèng
+声母 m: mī mí mǐ mì mi
+声母 m: mián miǎn miàn mian
+声母 m: miāo miáo miǎo miào
+声母 m: miē miè
+声母 m: mín mǐn
+声母 m: míng mǐng mìng ming
+声母 m: miù
+声母 m: mō mó mǒ mò mo
+声母 m: mōu móu mǒu
+声母 m: mú mǔ mù mu
+
+# ── 声母 f（9 个基础音节 / 37 个带调音节）──
+声母 f: fā fá fǎ fà fa
+声母 f: fān fán fǎn fàn fan
+声母 f: fāng fáng fǎng fàng fang
+声母 f: fēi féi fěi fèi
+声母 f: fēn fén fěn fèn fen
+声母 f: fēng féng fěng fèng feng
+声母 f: fó
+声母 f: fóu fǒu
+声母 f: fū fú fǔ fù fu
+
+# ── 声母 d（23 个基础音节 / 77 个带调音节）──
+声母 d: dā dá dǎ dà da
+声母 d: dāi dǎi dài
+声母 d: dān dǎn dàn dan
+声母 d: dāng dǎng dàng dang
+声母 d: dāo dáo dǎo dào dao
+声母 d: dē dé de
+声母 d: děi
+声母 d: dèn
+声母 d: dēng děng dèng
+声母 d: dī dí dǐ dì di
+声母 d: diǎ
+声母 d: diān diǎn diàn
+声母 d: diāo diǎo diào diao
+声母 d: diē dié die
+声母 d: dīng dǐng dìng ding
+声母 d: diū
+声母 d: dōng dǒng dòng
+声母 d: dōu dóu dǒu dòu dou
+声母 d: dū dú dǔ dù du
+声母 d: duān duǎn duàn
+声母 d: duī duǐ duì
+声母 d: dūn dǔn dùn
+声母 d: duō duó duǒ duò duo
+
+# ── 声母 t（19 个基础音节 / 80 个带调音节）──
+声母 t: tā tǎ tà ta
+声母 t: tāi tái tài tai
+声母 t: tān tán tǎn tàn tan
+声母 t: tāng táng tǎng tàng tang
+声母 t: tāo táo tǎo tào tao
+声母 t: tè
+声母 t: tēng téng teng
+声母 t: tī tí tǐ tì ti
+声母 t: tiān tián tiǎn tiàn
+声母 t: tiāo tiáo tiǎo tiào tiao
+声母 t: tiē tiě tiè
+声母 t: tīng tíng tǐng ting
+声母 t: tōng tóng tǒng tòng tong
+声母 t: tōu tóu tǒu tòu tou
+声母 t: tū tú tǔ tù tu
+声母 t: tuān tuán tuǎn tuàn
+声母 t: tuī tuí tuǐ tuì
+声母 t: tūn tún tǔn tun
+声母 t: tuō tuó tuǒ tuò tuo
+
+# ── 声母 n（24 个基础音节 / 70 个带调音节）──
+声母 n: nā ná nǎ nà na
+声母 n: nái nǎi nài nai
+声母 n: nān nán nǎn nàn nan
+声母 n: nāng náng nǎng nàng nang
+声母 n: nāo náo nǎo nào nao
+声母 n: né nè ne
+声母 n: něi nèi
+声母 n: nèn
+声母 n: néng
+声母 n: nī ní nǐ nì
+声母 n: niān nián niǎn niàn
+声母 n: niáng niàng niang
+声母 n: niǎo niào
+声母 n: niē niè
+声母 n: nín nǐn
+声母 n: níng nǐng nìng
+声母 n: niū niú niǔ niù niu
+声母 n: nóng nòng nong
+声母 n: nòu
+声母 n: nú nǔ nù
+声母 n: nuǎn
+声母 n: nuó nuò
+声母 n: nǚ nǜ nü
+声母 n: nüè
+
+# ── 声母 l（26 个基础音节 / 100 个带调音节）──
+声母 l: lā lá lǎ là la
+声母 l: lái lài
+声母 l: lán lǎn làn lan
+声母 l: lāng láng lǎng làng lang
+声母 l: lāo láo lǎo lào lao
+声母 l: lē lè le
+声母 l: lēi léi lěi lèi
+声母 l: lēng léng lěng lèng leng
+声母 l: lī lí lǐ lì li
+声母 l: liǎ
+声母 l: lián liǎn liàn
+声母 l: liáng liǎng liàng liang
+声母 l: liāo liáo liǎo liào liao
+声母 l: liē liě liè lie
+声母 l: līn lín lǐn lìn
+声母 l: líng lǐng lìng ling
+声母 l: liū liú liǔ liù liu
+声母 l: lo
+声母 l: lōng lóng lǒng lòng long
+声母 l: lōu lóu lǒu lòu lou
+声母 l: lū lú lǔ lù lu
+声母 l: luán luǎn luàn
+声母 l: lūn lún lǔn lùn
+声母 l: luō luó luǒ luò luo
+声母 l: lǘ lǚ lǜ
+声母 l: lüè
+
+# ── 声母 g（19 个基础音节 / 66 个带调音节）──
+声母 g: gā gá gǎ gà
+声母 g: gāi gǎi gài
+声母 g: gān gǎn gàn
+声母 g: gāng gǎng gàng gang
+声母 g: gāo gǎo gào
+声母 g: gē gé gě gè ge
+声母 g: gěi
+声母 g: gēn gén gěn gèn
+声母 g: gēng gěng gèng
+声母 g: gōng gǒng gòng gong
+声母 g: gōu gǒu gòu gou
+声母 g: gū gǔ gù gu
+声母 g: guā guǎ guà
+声母 g: guāi guái guǎi guài
+声母 g: guān guǎn guàn
+声母 g: guāng guǎng guàng
+声母 g: guī guǐ guì gui
+声母 g: gǔn gùn
+声母 g: guō guó guǒ guò guo
+
+# ── 声母 k（19 个基础音节 / 54 个带调音节）──
+声母 k: kā kǎ
+声母 k: kāi kǎi kài
+声母 k: kān kǎn kàn
+声母 k: kāng káng kàng
+声母 k: kāo kǎo kào
+声母 k: kē ké kě kè ke
+声母 k: kēi
+声母 k: kěn kèn
+声母 k: kēng
+声母 k: kōng kǒng kòng
+声母 k: kōu kǒu kòu kou
+声母 k: kū kǔ kù
+声母 k: kuā kuǎ kuà
+声母 k: kuǎi kuài kuai
+声母 k: kuān kuǎn
+声母 k: kuāng kuáng kuǎng kuàng kuang
+声母 k: kuī kuí kuǐ kuì
+声母 k: kūn kǔn kùn
+声母 k: kuò
+
+# ── 声母 h（19 个基础音节 / 76 个带调音节）──
+声母 h: hā há hǎ hà ha
+声母 h: hāi hái hǎi hài
+声母 h: hān hán hǎn hàn han
+声母 h: hāng háng hàng
+声母 h: hāo háo hǎo hào
+声母 h: hē hé hè he
+声母 h: hēi
+声母 h: hén hěn hèn
+声母 h: hēng héng hèng
+声母 h: hōng hóng hǒng hòng
+声母 h: hōu hóu hǒu hòu hou
+声母 h: hū hú hǔ hù hu
+声母 h: huā huá huà hua
+声母 h: huái huài
+声母 h: huān huán huǎn huàn huan
+声母 h: huāng huáng huǎng huàng huang
+声母 h: huī huí huǐ huì hui
+声母 h: hūn hún hùn hun
+声母 h: huō huó huǒ huò huo
+
+# ── 声母 j（14 个基础音节 / 53 个带调音节）──
+声母 j: jī jí jǐ jì ji
+声母 j: jiā jiá jiǎ jià jia
+声母 j: jiān jiǎn jiàn jian
+声母 j: jiāng jiǎng jiàng
+声母 j: jiāo jiáo jiǎo jiào
+声母 j: jiē jié jiě jiè jie
+声母 j: jīn jǐn jìn
+声母 j: jīng jǐng jìng jing
+声母 j: jiōng jiǒng
+声母 j: jiū jiǔ jiù jiu
+声母 j: jū jú jǔ jù ju
+声母 j: juān juǎn juàn
+声母 j: juē jué juě juè
+声母 j: jūn jùn
+
+# ── 声母 q（14 个基础音节 / 55 个带调音节）──
+声母 q: qī qí qǐ qì qi
+声母 q: qiā qiá qiǎ qià
+声母 q: qiān qián qiǎn qiàn qian
+声母 q: qiāng qiáng qiǎng qiàng
+声母 q: qiāo qiáo qiǎo qiào qiao
+声母 q: qiē qié qiě qiè qie
+声母 q: qīn qín qǐn qìn
+声母 q: qīng qíng qǐng qìng qing
+声母 q: qióng
+声母 q: qiū qiú qiǔ
+声母 q: qū qú qǔ qù qu
+声母 q: quān quán quǎn quàn
+声母 q: quē qué què
+声母 q: qūn qún
+
+# ── 声母 x（14 个基础音节 / 61 个带调音节）──
+声母 x: xī xí xǐ xì xi
+声母 x: xiā xiá xiǎ xià xia
+声母 x: xiān xián xiǎn xiàn
+声母 x: xiāng xiáng xiǎng xiàng
+声母 x: xiāo xiáo xiǎo xiào
+声母 x: xiē xié xiě xiè xie
+声母 x: xīn xín xǐn xìn xin
+声母 x: xīng xíng xǐng xìng xing
+声母 x: xiōng xióng xiǒng xiòng xiong
+声母 x: xiū xiǔ xiù
+声母 x: xū xú xǔ xù xu
+声母 x: xuān xuán xuǎn xuàn
+声母 x: xuē xué xuě xuè
+声母 x: xūn xún xùn
+
+# ── 声母 zh（19 个基础音节 / 68 个带调音节）──
+声母 zh: zhā zhá zhǎ zhà zha
+声母 zh: zhāi zhái zhǎi zhài
+声母 zh: zhān zhǎn zhàn
+声母 zh: zhāng zhǎng zhàng zhang
+声母 zh: zhāo zháo zhǎo zhào
+声母 zh: zhē zhé zhě zhè zhe
+声母 zh: zhēn zhěn zhèn
+声母 zh: zhēng zhěng zhèng zheng
+声母 zh: zhī zhí zhǐ zhì zhi
+声母 zh: zhōng zhǒng zhòng
+声母 zh: zhōu zhóu zhǒu zhòu zhou
+声母 zh: zhū zhú zhǔ zhù zhu
+声母 zh: zhuā zhuǎ
+声母 zh: zhuǎi zhuài
+声母 zh: zhuān zhuǎn zhuàn zhuan
+声母 zh: zhuāng zhuàng zhuang
+声母 zh: zhuī zhuì zhui
+声母 zh: zhūn zhǔn
+声母 zh: zhuō zhuó
+
+# ── 声母 ch（19 个基础音节 / 75 个带调音节）──
+声母 ch: chā chá chǎ chà
+声母 ch: chāi chái chǎi chài
+声母 ch: chān chán chǎn chàn chan
+声母 ch: chāng cháng chǎng chàng chang
+声母 ch: chāo cháo chǎo chào chao
+声母 ch: chē chě chè
+声母 ch: chēn chén chěn chèn chen
+声母 ch: chēng chéng chěng chèng cheng
+声母 ch: chī chí chǐ chì
+声母 ch: chōng chóng chǒng chòng
+声母 ch: chōu chóu chǒu chòu chou
+声母 ch: chū chú chǔ chù chu
+声母 ch: chuā
+声母 ch: chuāi chuǎi chuài
+声母 ch: chuān chuán chuǎn chuàn
+声母 ch: chuāng chuáng chuǎng chuàng
+声母 ch: chuī chuí chui
+声母 ch: chūn chún chǔn
+声母 ch: chuō chuò chuo
+
+# ── 声母 sh（19 个基础音节 / 63 个带调音节）──
+声母 sh: shā shá shǎ shà
+声母 sh: shāi shǎi shài
+声母 sh: shān shǎn shàn
+声母 sh: shāng shǎng shàng shang
+声母 sh: shāo sháo shǎo shào
+声母 sh: shē shé shě shè
+声母 sh: shéi
+声母 sh: shēn shén shěn shèn shen
+声母 sh: shēng shéng shěng shèng sheng
+声母 sh: shī shí shǐ shì shi
+声母 sh: shōu shǒu shòu
+声母 sh: shū shú shǔ shù shu
+声母 sh: shuā shuǎ shuà
+声母 sh: shuāi shuǎi shuài
+声母 sh: shuān shuàn
+声母 sh: shuāng shuǎng
+声母 sh: shuí shuǐ shuì
+声母 sh: shǔn shùn
+声母 sh: shuō shuò
+
+# ── 声母 r（14 个基础音节 / 34 个带调音节）──
+声母 r: rán rǎn
+声母 r: rāng ráng rǎng ràng rang
+声母 r: ráo rǎo rào
+声母 r: rě rè
+声母 r: rén rěn rèn ren
+声母 r: rēng réng
+声母 r: rì
+声母 r: róng rǒng
+声母 r: róu ròu
+声母 r: rú rǔ rù
+声母 r: ruán ruǎn
+声母 r: ruí ruǐ ruì
+声母 r: rùn
+声母 r: ruó ruò
+
+# ── 声母 z（17 个基础音节 / 51 个带调音节）──
+声母 z: zā zá zǎ
+声母 z: zāi zǎi zài
+声母 z: zān zán zǎn zàn
+声母 z: zāng zǎng zàng
+声母 z: zāo záo zǎo zào zao
+声母 z: zé zè
+声母 z: zéi
+声母 z: zěn zèn
+声母 z: zēng zèng
+声母 z: zī zǐ zì zi
+声母 z: zōng zǒng zòng zong
+声母 z: zōu zǒu zòu
+声母 z: zū zú zǔ
+声母 z: zuān zuǎn zuàn
+声母 z: zuī zuǐ zuì
+声母 z: zūn zǔn
+声母 z: zuō zuó zuǒ zuò
+
+# ── 声母 c（16 个基础音节 / 48 个带调音节）──
+声母 c: cā cǎ
+声母 c: cāi cái cǎi cài cai
+声母 c: cān cán cǎn càn
+声母 c: cāng cáng
+声母 c: cāo cáo cǎo
+声母 c: cè
+声母 c: cēn cén
+声母 c: cēng céng cèng ceng
+声母 c: cī cí cǐ cì
+声母 c: cōng cóng
+声母 c: còu
+声母 c: cū cú cù
+声母 c: cuān cuán cuàn
+声母 c: cuī cuǐ cuì
+声母 c: cūn cún cǔn cùn
+声母 c: cuō cuó cuǒ cuò cuo
+
+# ── 声母 s（16 个基础音节 / 49 个带调音节）──
+声母 s: sā sǎ sà sa
+声母 s: sāi sài
+声母 s: sān sǎn sàn
+声母 s: sāng sǎng sàng sang
+声母 s: sāo sǎo sào sao
+声母 s: sè
+声母 s: sēn
+声母 s: sēng
+声母 s: sī sǐ sì si
+声母 s: sōng sǒng sòng
+声母 s: sōu sǒu sòu sou
+声母 s: sū sú sù
+声母 s: suān suǎn suàn suan
+声母 s: suī suí suǐ suì sui
+声母 s: sūn sǔn sùn
+声母 s: suō suǒ suo
+
+# ── 声母 y（15 个基础音节 / 63 个带调音节）──
+声母 y: yā yá yǎ yà ya
+声母 y: yān yán yǎn yàn
+声母 y: yāng yáng yǎng yàng
+声母 y: yāo yáo yǎo yào yao
+声母 y: yē yé yě yè ye
+声母 y: yī yí yǐ yì yi
+声母 y: yīn yín yǐn yìn
+声母 y: yīng yíng yǐng yìng ying
+声母 y: yō
+声母 y: yōng yóng yǒng yòng
+声母 y: yōu yóu yǒu yòu you
+声母 y: yū yú yǔ yù
+声母 y: yuān yuán yuǎn yuàn yuan
+声母 y: yuē yuě yuè
+声母 y: yūn yún yǔn yùn
+
+# ── 声母 w（9 个基础音节 / 39 个带调音节）──
+声母 w: wā wá wǎ wà wa
+声母 w: wāi wǎi wài wai
+声母 w: wān wán wǎn wàn wan
+声母 w: wāng wáng wǎng wàng wang
+声母 w: wēi wéi wěi wèi wei
+声母 w: wēn wén wěn wèn
+声母 w: wēng wěng wèng
+声母 w: wō wǒ wò
+声母 w: wū wú wǔ wù wu
+
+# ── 零声母（11 个基础音节 / 36 个带调音节）──
+零声母: ā á a
+零声母: āi ái ǎi ài
+零声母: ān ǎn àn
+零声母: āng áng àng
+零声母: āo áo ǎo ào
+零声母: ē é ě è
+零声母: ēi
+零声母: ēn ěn èn
+零声母: ér ěr èr er
+零声母: ō ó ò o
+零声母: ōu ǒu òu
