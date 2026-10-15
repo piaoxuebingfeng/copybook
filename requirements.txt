@@ -1,0 +1,7 @@
+# 运行字帖生成器需要的 Python 库
+# 安装： pip install -r requirements.txt
+openpyxl>=3.1
+pillow>=10.0
+numpy>=1.24
+scipy>=1.10
+pymupdf>=1.23

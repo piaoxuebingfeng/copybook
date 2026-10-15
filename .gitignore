@@ -1,0 +1,14 @@
+# 生成物：和代码无关，任何时候都能重新生成，不入库
+output/
+幼小衔接字帖*.xlsx
+幼小衔接字帖*.pdf
+
+# 字库首次运行时解压出来的目录（约 47MB），从 data/*.tgz 自动生成
+data/hanzi-writer-data/
+
+__pycache__/
+*.py[cod]
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
