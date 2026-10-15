@@ -45,6 +45,11 @@ if ARG.get("--file"):
     SRC = open(_p, encoding="utf-8").read()
 else:
     SRC = ARG.get("--chars", ARG.get("--items", ""))
+# 输入同样支持汉字原文（与 zitie_gen --type=pin 的第三种写法对齐）
+import pinyin_dict as PD
+SRC, _conv, _miss = PD.expand_spec(SRC)
+if _miss:
+    raise SystemExit("✗ 输入里有词典查不到拼音的字：" + "、".join(_miss))
 ITEMS = [(i, h) for _, lst in P.parse_items(SRC) for i, h in lst]
 if not ITEMS:
     raise SystemExit("✗ --chars/--file 没有解析出音节")

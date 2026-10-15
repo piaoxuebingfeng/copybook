@@ -100,15 +100,22 @@ HELP = """
   字母主体写在中格、升部与声调在上格、降部在下格 —— 字号由 x-height 反解，
   基线锚在中格下沿，所以字母一定坐在正确的带上。
   格宽按最长音节自适应（zhuāng 也放得下），但字号绝不缩 —— 缩了字母就掉出带。
-  音节直接给，不查词典：既能写带调字符 `bā`，也能用数字标调 `ba1`。
+  音节有三种给法（可混用在同一个文件里，逐行自动识别）：
+   ① 带调字符：`bā 八`（输入法符号面板里能打，或从 拼音音节总表.txt 复制）
+   ② 数字标调：`ba1 八`（键盘直接打，`nv3`=nǚ）
+   ③ 汉字原文：`我爱北京天安门` —— 词典自动转拼音、汉字做标注，多音字按
+      词消歧（长大=zhǎng、银行=háng），变调/轻声也在词里（一下=yí、头发=tóu fa）
   --chars="bā 八 / mā 妈 / bà 爸"    一行一个音节，可跟一个汉字标注
   --font=路径              指定字体（默认自动探测：fonts/ 里带「拼音」的优先，
                            然后系统楷体 -> AR PL UKai -> Noto CJK；无拼音专用字体时
                            自动把双层的 g 换成单层教学形 ɡ）
   --trace-times=full       首格示范后描红几格（默认 full = 整行都描），其余留白
+  词典：data/pinyin-dict.json.gz（34 万词，取自 pinyin-pro，MIT），用于方式③；
+        缺它时方式①②不受影响
 
 例子：
   python3 zitie_gen.py --type=pinyin "bā 八 / mā 妈 / bà 爸" --name=拼音练习
+  python3 zitie_gen.py --type=pin "我爱北京天安门"          # 汉字自动转拼音
   python3 zitie_gen.py 天地花鸟虫                 # 2 字/页，A5 版式（默认）
   python3 zitie_gen.py 天地花鸟虫 --layout=a4     # 4 字/页，紧凑版式
   python3 zitie_gen.py 天地花鸟虫 --cell-cm=3     # 格子放大到 3cm
@@ -131,7 +138,7 @@ def parse_args(argv):
         "cell_cm": "",           # 田字格边长，留空则 a5=2.4cm / a4=2.0cm
         "outdir": os.path.join(ROOT, "output"),
         "stroke_order": False,   # 田字格里逐格练笔顺
-        "type": "hanzi",         # hanzi=汉字笔顺字帖；pinyin=四线三格拼音字帖
+        "type": "hanzi",         # hanzi=汉字笔顺字帖；pinyin/pin=四线三格拼音字帖
         "font": "",              # 拼音字帖用哪个字体（留空则自动探测）
         "trace_times": "full",   # 拼音：首格示范后描红几格（full=整行描红）
     }
@@ -175,14 +182,24 @@ def main_pinyin(o):
             die(f"找不到音节表文件 {o['file']}")
         spec = open(o["file"], encoding="utf-8").read()
     if not spec.strip():
-        die('没有指定音节。用法：python3 zitie_gen.py --type=pinyin "bā 八 / mā 妈"')
+        die('没有指定音节。用法：python3 zitie_gen.py --type=pinyin "bā 八 / mā 妈"\n'
+            '  也可以直接写汉字：python3 zitie_gen.py --type=pin "我爱北京天安门"')
+    # 第三种输入方式：整行都是汉字（没有任何 ASCII 字母/数字）-> 词典自动转拼音
+    import pinyin_dict as PD
+    spec, converted, missing = PD.expand_spec(spec)
+    for gname, pairs in converted:
+        print(f"  汉字转拼音【{gname}】：{' '.join(f'{sy} {hz}' for sy, hz in pairs)}")
+    if missing:
+        die("这些字在词典里查不到拼音（生僻字或 ńg 类叹词）："
+            + "、".join(missing) + "\n  可改用音节写法绕开：ba1 八")
     flat = [(i, h) for _, lst in P.parse_items(spec) for i, h in lst]
     if not flat:
         die("解析不出音节，请检查输入")
     bad = P.validate(flat)
     if bad:
         die("这些不是合法音节：" + "、".join(bad)
-            + "（音节只能由字母和带调的元音组成，声调也可写 ba1/ma3/ma5）")
+            + "（音节只能由字母和带调的元音组成，声调也可写 ba1/ma3/ma5）\n"
+            "  提示：汉字自动转拼音要求整行都是汉字，不能和音节混写")
 
     safe = "".join(c for c in "".join(i for i, _ in flat) if c.isalnum())
     name = o["name"] or ("拼音_" + safe[:10])
@@ -246,7 +263,7 @@ def main_pinyin(o):
 
 def main():
     o = parse_args(sys.argv[1:])
-    if o["type"] in ("pinyin", "拼音"):
+    if o["type"] in ("pinyin", "拼音", "pin"):
         return main_pinyin(o)
     if o["type"] not in ("hanzi", "汉字"):
         die(f"未知的 --type={o['type']}（可选 hanzi / pinyin）")
