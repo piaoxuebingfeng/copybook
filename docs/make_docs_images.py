@@ -244,6 +244,73 @@ def main():
         crop.save(p, optimize=True)
         made.append(p)
 
+    # ---------- 3c. 拼音字帖：四线三格与「落带」 ----------
+    # 两个例子**跨页按内容找**：第一页的音节（bā mā bà mǎ dà tǔ mǐ nǚ）碰巧都没有降部，
+    # 所以"降部进下格"的例子要到第二页（shàng 的 g）才有。按行号写死就会选错。
+    PY = "output/示例_拼音/示例_拼音.pdf"
+    if os.path.exists(os.path.join(ROOT, PY)):
+        want = ["up", "down"]
+        found = {}
+        for pg in (1, 2):
+            imp = render(PY, pg, 420)
+            pylines = green_lines(imp, px_cm)
+            a = np.asarray(imp).astype(int)
+            R_, G_, B_ = a[..., 0], a[..., 1], a[..., 2]
+            pinkmask = ((abs(R_ - 232) < 45) & (abs(G_ - 192) < 45)
+                        & (abs(B_ - 192) < 45) & (R_ > G_ + 10))
+            for bi in range(len(pylines) // 2):
+                if not want:
+                    break
+                top = pylines[bi * 2] * px_cm
+                bot = pylines[bi * 2 + 1] * px_cm
+                hh = bot - top
+                rr = np.flatnonzero(pinkmask[int(top):int(bot) + 1].any(axis=1))
+                if not rr.size:
+                    continue
+                if "up" in want and rr.min() < hh / 3:
+                    want.remove("up"); found["up"] = (imp, top, bot)
+                elif "down" in want and rr.max() > 2 * hh / 3 + 4:
+                    want.remove("down"); found["down"] = (imp, top, bot)
+
+        def annotate_bands(im, top_px, bot_px):
+            """在带内右侧空白处标出三条带各放什么。字号随带高走，否则在 20cm 宽图里看不见。"""
+            d = ImageDraw.Draw(im)
+            h = bot_px - top_px
+            f = font(int(h * 0.19))
+            for i, txt in enumerate(("上格 · 升部与声调", "中格 · 字母主体", "下格 · 降部")):
+                cy = top_px + h * (i + 0.5) / 3
+                tw = d.textlength(txt, font=f)
+                x = im.width - tw - int(h * 0.5)
+                d.rounded_rectangle([x - 16, cy - h * 0.14, x + tw + 16, cy + h * 0.14],
+                                    radius=12, fill=(255, 255, 255),
+                                    outline=(198, 204, 212), width=3)
+                d.text((x, cy - h * 0.10), txt, font=f, fill=INK)
+            return im
+
+        crops = []
+        for key in ("up", "down"):
+            if key not in found:
+                continue
+            imp, top, bot = found[key]
+            pad = 0.30 * px_cm
+            c = imp.crop((int(0.5 * px_cm), int(top - pad),
+                          int(20.4 * px_cm), int(bot + pad)))
+            crops.append(annotate_bands(c, int(pad), int(pad + (bot - top))))
+        if crops:
+            W = max(c.width for c in crops)
+            gap = 22
+            total = Image.new("RGB", (W, sum(c.height for c in crops) + gap), (244, 246, 249))
+            yy = 0
+            for c in crops:
+                total.paste(c, (0, yy)); yy += c.height + gap
+            crop = with_title(total, "④ 拼音字帖：四线三格（--type=pinyin）",
+                              "字母主体写在中格，升部与声调进上格、降部进下格 —— 字号由 x-height "
+                              "反解、基线锚在中格下沿，所以一定落在正确的带上"
+                              "（两张图是自动挑出来的：一张有声调、一张有降部）")
+            p = os.path.join(OUT, "zoom-pinyin.png")
+            crop.save(p, optimize=True)
+            made.append(p)
+
     # ---------- 4. 打印裁剪示意 ----------
     # 裁切线是**从 PDF 里探测出来的**，不是想当然取宽/高的一半：
     # 纵向版式的两张 A5 上下堆叠，裁切线是横线；横向版式左右并排，裁切线是竖线。

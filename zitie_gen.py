@@ -73,6 +73,8 @@ HELP = """
   --strip-max-cm=16        笔顺教学条单行宽度上限，默认 16（= 田字格总宽）
 
 笔顺练习模式：
+  --type=pinyin            生成**拼音字帖**（四线三格），此时参数含义见下方「拼音字帖」
+
   --stroke-order           打开后，每个字的所有田字格都用来练笔顺：
                            第 1 格写第 1 笔、第 2 格写前 2 笔……第 N 格写完整字，
                            如此练 3 遍，再重复 3 个整字，剩下的格子留白给学生自己写。
@@ -92,7 +94,17 @@ HELP = """
   --setup                  下载字库后退出（只在首次或换设备时需要）
   -h, --help               显示本帮助
 
+拼音字帖（--type=pinyin）：
+  一行一个音节，A4 纵向，四线三格（一条带 0.79cm，共 2.38cm）。
+  字母主体写在中格、升部与声调在上格、降部在下格 —— 字号由 x-height 反解，
+  基线锚在中格下沿，所以字母一定坐在正确的带上。
+  音节直接给，不查词典：既能写带调字符 `bā`，也能用数字标调 `ba1`。
+  --chars="bā 八 / mā 妈 / bà 爸"    一行一个音节，可跟一个汉字标注
+  --font=路径              指定字体（默认自动探测：fonts/ -> 楷体 -> AR PL UKai -> Noto CJK）
+  --trace-times=2          每个音节描红几遍（默认 2），其余留白
+
 例子：
+  python3 zitie_gen.py --type=pinyin "bā 八 / mā 妈 / bà 爸" --name=拼音练习
   python3 zitie_gen.py 天地花鸟虫                 # 2 字/页，A5 版式（默认）
   python3 zitie_gen.py 天地花鸟虫 --layout=a4     # 4 字/页，紧凑版式
   python3 zitie_gen.py 天地花鸟虫 --cell-cm=3     # 格子放大到 3cm
@@ -115,6 +127,9 @@ def parse_args(argv):
         "cell_cm": "",           # 田字格边长，留空则 a5=2.4cm / a4=2.0cm
         "outdir": os.path.join(ROOT, "output"),
         "stroke_order": False,   # 田字格里逐格练笔顺
+        "type": "hanzi",         # hanzi=汉字笔顺字帖；pinyin=四线三格拼音字帖
+        "font": "",              # 拼音字帖用哪个字体（留空则自动探测）
+        "trace_times": "2",      # 拼音：每个音节描红几遍
     }
     if any(a in ("-h", "--help", "help") for a in argv):
         print(HELP)
@@ -144,8 +159,93 @@ def _strip_cells(o):
     return 5 if (o["layout"] == "a5" and o["orient"] == "landscape") else 8
 
 
+def main_pinyin(o):
+    """拼音字帖：一行一个音节（四线三格），A4 纵向。"""
+    import pinyin_input as P
+
+    if o["layout"] != "a5" or o["orient"] != "portrait":
+        print("⚠ 拼音字帖固定 A4 纵向（一行一个音节），--layout / --orient 本次忽略")
+    spec = o["spec"]
+    if o["file"]:
+        if not os.path.exists(o["file"]):
+            die(f"找不到音节表文件 {o['file']}")
+        spec = open(o["file"], encoding="utf-8").read()
+    if not spec.strip():
+        die('没有指定音节。用法：python3 zitie_gen.py --type=pinyin "bā 八 / mā 妈"')
+    flat = [(i, h) for _, lst in P.parse_items(spec) for i, h in lst]
+    if not flat:
+        die("解析不出音节，请检查输入")
+    bad = P.validate(flat)
+    if bad:
+        die("这些不是合法音节：" + "、".join(bad)
+            + "（音节只能由字母和带调的元音组成，声调也可写 ba1/ma3/ma5）")
+
+    safe = "".join(c for c in "".join(i for i, _ in flat) if c.isalnum())
+    name = o["name"] or ("拼音_" + safe[:10])
+    name = "".join(c for c in name if c not in '/\\:*?"<>|')
+    work = os.path.join(o["outdir"], name)
+    imgs = os.path.join(work, "pinyin")
+    xlsx = os.path.join(work, name + ".xlsx")
+    os.makedirs(work, exist_ok=True)
+    title = o["title"] or "幼小衔接 · 拼音字帖"
+    sub = o["subtitle"] or ("四线三格：字母主体写在中格，升部与声调写在上格，降部写在下格")
+    trace_times = o["trace_times"]
+    font_opt = [f"--font={o['font']}"] if o["font"] else []
+    print(f"共 {len(flat)} 个音节：{' '.join(i for i, _ in flat)}")
+
+    def run(desc, argv):
+        print(f"  · {desc}")
+        r = subprocess.run([PY] + argv, capture_output=True, text=True)
+        if r.returncode != 0:
+            print(r.stdout[-1500:]); print(r.stderr[-1500:])
+            die(f"{desc} 失败")
+        return r.stdout
+
+    run("渲染描红图", ["render_pinyin.py", f"--items={spec}", f"--outdir={imgs}",
+                     f"--trace-times={trace_times}", *font_opt])
+    base = [f"--chars={spec}", f"--images={imgs}", f"--title={title}",
+            f"--subtitle={sub}", f"--trace-times={trace_times}", *font_opt]
+    run("排版 xlsx", ["generate_pinyin.py", *base, "--mode=excel", f"--out={xlsx}"])
+
+    made = [xlsx]
+    want_pdf = o["pdf"] if o["pdf"] is not None else shutil.which("soffice") is not None
+    if want_pdf:
+        if not shutil.which("soffice"):
+            print("  ⚠ 未找到 soffice，跳过 PDF（Excel/WPS 里直接打印 xlsx 即可）")
+        else:
+            # PDF 要用 LibreOffice 的列宽模型重建一份，几何才精确
+            tmp_x = os.path.join(work, "_lo_tmp.xlsx")
+            run("按 LibreOffice 列宽重建", ["generate_pinyin.py", *base, "--mode=lo",
+                                        f"--out={tmp_x}"])
+            pdfdir = os.path.join(work, "_pdf")
+            os.makedirs(pdfdir, exist_ok=True)
+            subprocess.run(["soffice", "--headless",
+                            f"-env:UserInstallation=file://{os.path.join(tempfile.gettempdir(), 'zitie_lo')}",
+                            "--convert-to", "pdf", "--outdir", pdfdir, tmp_x],
+                           capture_output=True, text=True, timeout=300)
+            src = os.path.join(pdfdir, "_lo_tmp.pdf")
+            if os.path.exists(src):
+                shutil.move(src, os.path.join(work, name + ".pdf"))
+                made.append(os.path.join(work, name + ".pdf"))
+                os.remove(tmp_x)
+                shutil.rmtree(pdfdir, ignore_errors=True)
+            else:
+                print("  ⚠ PDF 转换未产出文件，请直接用 xlsx 打印")
+
+    print("\n完成！")
+    for f in made:
+        print(f"  {os.path.relpath(f, ROOT)}")
+    print(f"  （中间产物：{os.path.relpath(imgs, ROOT)}）")
+    print(f"\n建议先验收：python3 verify_pinyin.py {os.path.relpath(xlsx, ROOT)} \\")
+    print(f'  --chars="{spec}"' + (f" --pdf={os.path.relpath(made[1], ROOT)}" if len(made) > 1 else ""))
+
+
 def main():
     o = parse_args(sys.argv[1:])
+    if o["type"] in ("pinyin", "拼音"):
+        return main_pinyin(o)
+    if o["type"] not in ("hanzi", "汉字"):
+        die(f"未知的 --type={o['type']}（可选 hanzi / pinyin）")
 
     import stroke_store
     from stroke_store import parse_chars

@@ -28,6 +28,7 @@ Excel + PDF 双格式 · 几何精确到 0.1mm · 完全离线
 [两种练习方式](#两种练习方式) ·
 [快速开始](#快速开始) ·
 [打印与裁剪](#打印与裁剪) ·
+[拼音字帖](#拼音字帖) ·
 [命令行参数](#命令行参数) ·
 [技术要点](#技术要点) ·
 [自带验收脚本](#自带验收脚本) ·
@@ -208,6 +209,42 @@ python3 zitie_gen.py --help
 
 ---
 
+## 拼音字帖
+
+同一个工具还能生成**拼音字帖**（`--type=pinyin`）：一行一个音节，A4 纵向，四线三格。
+字母主体写在中格、升部与声调进上格、降部进下格。
+
+![拼音字帖的四线三格](docs/zoom-pinyin.png)
+
+| 特点 | 说明 |
+| --- | --- |
+| **字母真的坐在带上** | 字号由 x-height 反解、基线锚在中格下沿 —— 不是「放进格子居中」，那会让字母整条带地偏 |
+| **四线三格是原生表格** | 上下两条绿实线 + 中间两条灰虚线，全是 Excel 边框，不合并单元格，打印很锐利 |
+| **不查词典，因此不会错** | 音节由你直接给出，多音字（行 `xíng/háng`）不会被替你瞎猜 |
+| **两种写法都收** | `bā`（带调字符）与 `ba1`（数字标调）等价；`nv3` 也能写 |
+| **字体自动探测** | `fonts/` → 楷体 → AR PL UKai → Noto CJK；缺字符会明确报错，绝不渲染成豆腐块 |
+
+```bash
+# 音节后面可以跟一个汉字做标注
+python3 zitie_gen.py --type=pinyin "bā 八 / mā 妈 / bà 爸 / mǎ 马"
+python3 zitie_gen.py --type=pinyin --file=音节表示例.txt --name=拼音练习
+```
+
+音节表格式和字表一样，支持 `组名:` 分组：
+
+```text
+声母与单韵母: bā 八 / pá 爬 / mā 妈 / mǎ 马
+拼读: xiǎo 小 / shàng 上 / xué 学
+整体认读: zhī 知 / chī 吃 / shì 是
+```
+
+> **这里有个待你决定的取舍**：**一个音节一个方格的版本没有做**。`zhuāng` 这种
+> 6 个字母的音节在 2.38cm 方格里放不下，硬缩字号字母就会脱离四线格的带 ——
+> 所以 v1 用了「一行一个音节」。如果你更想要方格版、或者「一格一个字母」的拆字版，
+> 见 [docs/PINYIN.md](docs/PINYIN.md) 里的方案 B / C / D。
+
+---
+
 ## 命令行参数
 
 | 参数 | 说明 | 默认 |
@@ -221,6 +258,9 @@ python3 zitie_gen.py --help
 | `--orient=portrait` | A4 纵向，上下两张横版 A5，8 格/行。也可写 `纵向` / `v` | `portrait` |
 | `--orient=landscape` | A4 横向，左右两张竖版 A5，5 格/行。也可写 `横向` / `h` | — |
 | `--stroke-order` | 田字格逐格练笔顺（见[两种练习方式](#两种练习方式)） | 关闭 |
+| `--type=pinyin` | 生成**拼音字帖**（四线三格，见[拼音字帖](#拼音字帖)） | `hanzi` |
+| `--font=路径` | 拼音字帖用哪个字体 | 自动探测 |
+| `--trace-times=2` | 拼音：每个音节描红几遍，其余留白 | `2` |
 | `--cell-cm=2.4` | 田字格边长（会取整到整数像素，保证是正方形） | a5→2.4 / a4→2.0 |
 | `--thin=N` | 笔画减细量，0~20。嫌笔画粗就调大 | `10` |
 | `--strip-max-cm=16` | 教学条单行宽度上限（即田字格总宽） | `16` |
@@ -276,6 +316,7 @@ python3 zitie_gen.py --help
 | `verify_stroke_order.py` | 笔顺练习模式的每一格 | 回到 xlsx 里按**图片像素内容**反查每张图是「哪个字的第几阶段」，还原阅读顺序，和排布算法逐格比对（能抓出铺错格、顺序颠倒、留白没留） |
 | `verify_pdf.py` | 最终 PDF 的页面 | 页面尺寸、内容有没有越出页边距、有没有被 `fitToWidth` 缩小、格子是不是正方形、描红格数量、五种颜色是否齐全 |
 | `verify_strips.py` | 最终 PDF 里的教学条 | 有没有被打印区域裁掉、有没有溢出纸张 |
+| `verify_pinyin.py` | 拼音字帖（xlsx + PDF 两边都查） | 三带是否等高、贴图是否纵向零偏移且高度等于三行之和、按像素反查每格是哪个音节、PDF 里虚线是否把绿线**严格三等分**、墨迹位置是否与渲染意图一致 |
 
 前三个查「生成过程中的中间产物」，后两个查「真正打印出去的东西」。都能直接跑：
 
@@ -359,14 +400,22 @@ python3 verify_stroke_order.py output/示例_笔顺练习
 ├── verify_pdf.py         验收：页面几何 / 颜色 / 描红数量
 ├── verify_strips.py      验收：教学条是否被裁切
 │
+├── sheet_layout.py       共享版面层（纸张几何 / 列宽标定 / 贴图 / 文字自检）
+├── pinyin_input.py       拼音音节解析（数字标调 / 合法性校验）
+├── render_pinyin.py      拼音渲染（字体探测 + 按基线对齐的四线格）
+├── generate_pinyin.py    拼音排版（原生四线格 + 按块高分页）
+├── verify_pinyin.py      验收：三带等高 / 贴图对齐 / 落带 / 严格三等分
+│
 ├── docs/
 │   ├── DESIGN.md               原理与完整踩坑记录
+│   ├── PINYIN.md               拼音字帖的设计与待定问题
 │   ├── make_docs_images.py     生成下面那些配图（可重跑）
 │   └── *.png                   README 用图
 │
 ├── data/                 字库压缩包（13MB，首次运行自动解压）
 ├── stroke_data_cn.json   34 字参照数据（校验脚本用）
-└── 字表示例.txt          字表文件格式示例
+├── 字表示例.txt          字表文件格式示例
+└── 音节表示例.txt        音节表文件格式示例
 ```
 
 跑一次生成之后（默认都在 `output/` 下，已在 `.gitignore` 里排除）：
@@ -397,6 +446,9 @@ produces print-ready stroke-order tracing worksheets as both `.xlsx` and `.pdf`.
   is within 0.1 mm of the sheet centre. Verified by bundled scripts that measure the exported PDF.
 * **Fully offline**: a 9,575-character stroke database ships with the repo.
 * Three layouts (`--layout=a5|a4`) × two A4 orientations (`--orient=portrait|landscape`).
+* `--type=pinyin` generates **pinyin (四线三格) worksheets** instead: one syllable per
+  ruled line, letters sized so the x-height fills the middle band and the baseline sits on
+  its lower edge, so ascenders/tones/descenders land in the correct bands.
 * `--stroke-order` fills **every** 田字格 with the stroke-by-stroke progression
   (cell 1 = stroke 1, cell 2 = strokes 1-2, …), three rounds, then three full
   characters, then blank cells — so children practise the writing order, not just tracing.

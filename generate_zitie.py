@@ -22,16 +22,18 @@
 import json
 import os
 from openpyxl import Workbook
-from openpyxl.styles import Font, Alignment, Border, Side
+from openpyxl.styles import Font, Alignment
 from openpyxl.drawing.image import Image as XLImage
-from openpyxl.drawing.spreadsheet_drawing import OneCellAnchor, AnchorMarker
-from openpyxl.drawing.xdr import XDRPositiveSize2D
-from openpyxl.utils.units import pixels_to_EMU
 from openpyxl.utils import get_column_letter
-from openpyxl.worksheet.page import PageMargins
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
-from openpyxl.worksheet.pagebreak import Break
+
+# 共享版面层：纸张几何 / 列宽标定 / 贴图 / 文字宽度自检，与拼音字帖共用
+import sheet_layout as S
+from sheet_layout import (snap_up_pt, place_inset_image, text_width_cm,
+                          check_text_width, col_width_for_px, setup_page,
+                          set_print_area, add_page_break,
+                          GREEN, OUTER, DASH)
 
 # ---------------- 版式参数 ----------------
 CELLS_PER_ROW = 8        # 每行田字格数
@@ -93,9 +95,7 @@ _MODE = ARG.get("--mode", "excel")
 _v = ARG.get("--out", "幼小衔接字帖.xlsx")
 _OUT = _v if _v.startswith("/") else f"{ROOT}/{_v}"
 
-_MODELS = {"excel": (7.0, 5.0), "lo": (7.374, 0.1)}
-_slope, _offset = _MODELS[_MODE]
-SUB_COL_W = round((SUB_PX - _offset) / _slope, 4)        # 子列宽 -> 恰好 SUB_PX 像素
+SUB_COL_W = col_width_for_px(SUB_PX, _MODE)              # 子列宽 -> 恰好 SUB_PX 像素
 
 # 横向版式的列布局（每半页固定 14.85cm）：
 #   [半页格子][右侧留白][内 0.5cm][内 0.5cm][半页格子][右侧留白]
@@ -117,13 +117,13 @@ LAND_TAIL_CM = ((LAND_HALF_W_CM - MARGIN_CM) - LAND_INNER_R_CM
 # 否则"正好相等"时 fitToWidth 可能把整页缩一丁点，格子就不再是 2.38125cm 了。
 LAND_TAIL_TRIM_CM = 0.1
 _GUT_PX = round(GUTTER_W_CM / 2.54 * 96)
-GUTTER_COL_W = round((_GUT_PX - _offset) / _slope, 4)      # 裁切线间隔列宽
+GUTTER_COL_W = col_width_for_px(_GUT_PX, _MODE)      # 裁切线间隔列宽
 _SLK_PX = round(LAND_SLACK_CM / 2.54 * 96)
 _TAIL_PX = round((LAND_SLACK_CM - LAND_TAIL_TRIM_CM) / 2.54 * 96)
-SLACK_COL_W = round((_SLK_PX - _offset) / _slope, 4)       # 半页右侧留白列宽
+SLACK_COL_W = col_width_for_px(_SLK_PX, _MODE)       # 半页右侧留白列宽
 _TAIL2_PX = round((LAND_TAIL_CM - LAND_TAIL_TRIM_CM) / 2.54 * 96)
-TAIL_COL_W = round((_TAIL2_PX - _offset) / _slope, 4)      # 最外侧留白列宽
-INNER_R_COL_W = round((round(LAND_INNER_R_CM / 2.54 * 96) - _offset) / _slope, 4)
+TAIL_COL_W = col_width_for_px(_TAIL2_PX, _MODE)      # 最外侧留白列宽
+INNER_R_COL_W = col_width_for_px(round(LAND_INNER_R_CM / 2.54 * 96), _MODE)
 
 TOTAL_SUBCOLS = CELLS_PER_ROW * 2          # 半页的子列数（合并单元格用）
 HALF_SUBCOLS = TOTAL_SUBCOLS
@@ -143,16 +143,6 @@ H5_LABEL_PT = 14.25      # 字头行
 H5_CUT_PT = 6.0          # 裁切线行
 
 
-def snap_up_pt(x):
-    """行高向上取整到 0.75pt 的整数倍（保证 Excel 与 LibreOffice 算出同样的高度）。"""
-    import math
-    return math.ceil(round(x / 0.75, 6)) * 0.75
-
-
-GREEN = "00B050"
-GRAY = "999999"
-OUTER = Side(style="thin", color=GREEN)
-DASH = Side(style="dashed", color=GRAY)
 
 
 # ---- 命令行参数 ----
@@ -223,35 +213,9 @@ def strip_metrics(ch):
 TEXT_WARNINGS = []
 
 
-def text_width_cm(text, pt):
-    """估算一段文字的渲染宽度（cm）。全角按 1 em，半角按 0.5 em。"""
-    em = sum(1.0 if ord(c) > 0x2000 else 0.5 for c in str(text))
-    return em * pt / 72 * 2.54
-
-
-def check_text_width(text, pt, row, avail=None):
-    """合并单元格会**直接裁掉**超出宽度的文字，所以这里必须自检。"""
-    if avail is None:
-        avail = TOTAL_SUBCOLS * SUB_CM
-    w = text_width_cm(text, pt)
-    if w > avail:
-        TEXT_WARNINGS.append(
-            f"第 {row} 行文字约 {w:.2f}cm，超过合并宽度 {avail:.2f}cm，会被裁掉：{str(text)[:40]}…")
-    return w
-
-
-def apply_grid_borders(ws, row_a, col_a):
-    """为一个 2x2 田字格设置边框：外框绿实线 + 内部灰虚线十字。"""
-    spec = [
-        # (行偏移, 列偏移, top,      bottom,   left,     right)
-        (0, 0, OUTER, DASH,  OUTER, DASH),
-        (0, 1, OUTER, DASH,  DASH,  OUTER),
-        (1, 0, DASH,  OUTER, OUTER, DASH),
-        (1, 1, DASH,  OUTER, DASH,  OUTER),
-    ]
-    for dr, dc, top, bottom, left, right in spec:
-        ws.cell(row=row_a + dr, column=col_a + dc).border = Border(
-            top=top, bottom=bottom, left=left, right=right)
+# text_width_cm / check_text_width（含全角半角宽度估算与合并单元格裁字自检）
+# 和 apply_grid_borders（2x2 子格画田字格）都搬到了 sheet_layout，
+# 拼音字帖要用同一份 —— 合并单元格会直接裁字，两边都得自检。
 
 
 def build():
@@ -260,14 +224,7 @@ def build():
     ws.title = "汉字笔顺字帖"
     ws.sheet_view.showGridLines = False
 
-    ws.page_setup.orientation = "portrait"
-    ws.page_setup.paperSize = 9
-    ws.page_setup.fitToWidth = 1
-    ws.page_setup.fitToHeight = 0
-    ws.sheet_properties.pageSetUpPr.fitToPage = True
-    ws.page_margins = PageMargins(
-        left=MARGIN_CM / 2.54, right=MARGIN_CM / 2.54,
-        top=MARGIN_CM / 2.54, bottom=MARGIN_CM / 2.54, header=0.2, footer=0.2)
+    setup_page(ws, "portrait", MARGIN_CM)
 
     for i in range(1, PRINT_COLS + 1):
         ws.column_dimensions[get_column_letter(i)].width = SUB_COL_W
@@ -320,7 +277,7 @@ def build():
         for _ in range(2):
             ra = r
             for k in range(CELLS_PER_ROW):
-                apply_grid_borders(ws, ra, 1 + k * 2)
+                S.box_borders(ws, ra, 1 + k * 2)
             ws.row_dimensions[ra].height = SUB_ROW_PT
             ws.row_dimensions[ra + 1].height = SUB_ROW_PT
             grid_rows.append(ra)
@@ -366,20 +323,6 @@ def stroke_order_plan(n, m, rounds=None, fulls=None):
     return seq + [None] * (m - len(seq))
 
 
-def place_inset_image(ws, path, col0, row0, size_px, inset_px):
-    """把图片放进单元格，四周内缩 inset_px —— 这样不会遮住格子边框。"""
-    im = XLImage(path)
-    inner = size_px - 2 * inset_px
-    im.width = inner
-    im.height = inner
-    anchor = OneCellAnchor()
-    anchor._from = AnchorMarker(col=col0, colOff=pixels_to_EMU(inset_px),
-                                row=row0, rowOff=pixels_to_EMU(inset_px))
-    anchor.ext = XDRPositiveSize2D(pixels_to_EMU(inner), pixels_to_EMU(inner))
-    im.anchor = anchor
-    ws.add_image(im)
-
-
 def add_images(ws, blocks):
     """把教学条和描红图放上去。返回笔顺模式下每个字的排布方案（供打印摘要）。"""
     plans = []
@@ -414,7 +357,7 @@ def add_images(ws, blocks):
                                   grid_rows[c // CELLS_PER_ROW] - 1,
                                   CELL_PX, TRACE_INSET_PX)
         else:
-            r0 = grid_rows[0] - 1        # AnchorMarker 的 row/col 从 0 开始
+            r0 = grid_rows[0] - 1        # place_inset_image 里的 row/col 从 0 开始
             for k in range(TRACE_CELLS):
                 place_inset_image(ws, tr, _c0 - 1 + 2 * k, r0, CELL_PX, TRACE_INSET_PX)
     return plans
@@ -427,7 +370,7 @@ def add_page_breaks(ws, blocks):
     cuts = 0
     for i, b in enumerate(blocks):
         if i > 0 and used + b["block_pt"] > usable:
-            ws.row_breaks.append(Break(id=blocks[i - 1]["grid_rows"][1] + 2))
+            add_page_break(ws, blocks[i - 1]["grid_rows"][1] + 2)
             used = 0
             cuts += 1
         used += b["block_pt"]
@@ -481,7 +424,7 @@ def build_half(ws, r, ch, gname, first):
     for _ in range(nrows):
         ra = r
         for k in range(CELLS_PER_ROW):
-            apply_grid_borders(ws, ra, 1 + k * 2)
+            S.box_borders(ws, ra, 1 + k * 2)
         ws.row_dimensions[ra].height = SUB_ROW_PT
         ws.row_dimensions[ra + 1].height = SUB_ROW_PT
         grid_rows.append(ra)
@@ -497,8 +440,7 @@ def build_half(ws, r, ch, gname, first):
     # ⑥ 裁切线：只画在第一半末尾（A4 正中），沿着它剪开就是两张 A5
     if first:
         for c in range(1, PRINT_COLS + 1):
-            ws.cell(row=r, column=c).border = Border(
-                bottom=Side(style="dashed", color="AAAAAA"))
+            S.dash_bottom(ws, r, c)
         ws.row_dimensions[r].height = H5_CUT_PT
         r += 1
 
@@ -538,14 +480,7 @@ def build_a5_landscape():
     ws.title = "汉字笔顺字帖"
     ws.sheet_view.showGridLines = False
 
-    ws.page_setup.orientation = "landscape"
-    ws.page_setup.paperSize = 9
-    ws.page_setup.fitToWidth = 1
-    ws.page_setup.fitToHeight = 0
-    ws.sheet_properties.pageSetUpPr.fitToPage = True
-    ws.page_margins = PageMargins(
-        left=MARGIN_CM / 2.54, right=MARGIN_CM / 2.54,
-        top=MARGIN_CM / 2.54, bottom=MARGIN_CM / 2.54, header=0.2, footer=0.2)
+    setup_page(ws, "landscape", MARGIN_CM)
 
     # 列布局：[左半][左留白][内0.5][内0.5][右半][右留白]
     C_SLACK_L = HALF_SUBCOLS + 1
@@ -612,7 +547,7 @@ def build_a5_landscape():
             ra = r
             for c0, ch, g in halves:
                 for k in range(CELLS_PER_ROW):
-                    apply_grid_borders(ws, ra, c0 + k * 2)
+                    S.box_borders(ws, ra, c0 + k * 2)
             ws.row_dimensions[ra].height = SUB_ROW_PT
             ws.row_dimensions[ra + 1].height = SUB_ROW_PT
             grid_rows.append(ra)
@@ -627,8 +562,7 @@ def build_a5_landscape():
 
         # ⑥ 裁切线：竖虚线，落在第一个间隔列的右边框（= 纸的正中 14.85cm）
         for rr in range(page_top, r):
-            ws.cell(row=rr, column=C_GUT1).border = Border(
-                right=Side(style="dashed", color="AAAAAA"))
+            S.dash_right(ws, rr, C_GUT1)
 
         for c0, ch, g in halves:
             blocks.append({
@@ -639,7 +573,7 @@ def build_a5_landscape():
                 "nrows": cap})
 
         if pi < len(pairs) - 1:
-            ws.row_breaks.append(Break(id=r - 1))
+            add_page_break(ws, r - 1)
             cuts += 1
 
     return wb, ws, r, blocks, cuts
@@ -652,14 +586,7 @@ def build_a5():
     ws.title = "汉字笔顺字帖"
     ws.sheet_view.showGridLines = False
 
-    ws.page_setup.orientation = "portrait"
-    ws.page_setup.paperSize = 9
-    ws.page_setup.fitToWidth = 1
-    ws.page_setup.fitToHeight = 0
-    ws.sheet_properties.pageSetUpPr.fitToPage = True
-    ws.page_margins = PageMargins(
-        left=MARGIN_CM / 2.54, right=MARGIN_CM / 2.54,
-        top=MARGIN_CM / 2.54, bottom=MARGIN_CM / 2.54, header=0.2, footer=0.2)
+    setup_page(ws, "portrait", MARGIN_CM)
 
     for i in range(1, PRINT_COLS + 1):
         ws.column_dimensions[get_column_letter(i)].width = SUB_COL_W
@@ -674,7 +601,7 @@ def build_a5():
             blocks.append(rec)
             r = rec["next_row"]
         if pi < len(pairs) - 1:                 # 每对字一页
-            ws.row_breaks.append(Break(id=r - 1))
+            add_page_break(ws, r - 1)
             cuts += 1
     return wb, ws, r, blocks, cuts
 
@@ -690,7 +617,7 @@ if __name__ == "__main__":
     plans = add_images(ws, blocks)
     if nb is None:
         nb = add_page_breaks(ws, blocks)
-    ws.print_area = f"A1:{get_column_letter(PRINT_COLS)}{last_row}"
+    set_print_area(ws, PRINT_COLS, last_row)
 
     wb.save(_OUT)
 
@@ -708,7 +635,7 @@ if __name__ == "__main__":
             print(f"    {ch}　{n:2d} 画 / {cells:2d} 格 -> {desc} + 整字 {fl} + 留白 {bl}")
     print(f"  子列宽 {SUB_COL_W}　子行高 {SUB_ROW_PT}pt　"
           f"-> 田字格 {CELL_CM}x{CELL_CM}cm ({CELL_PX:.1f}px)")
-    for w in TEXT_WARNINGS:
+    for w in S.TEXT_WARNINGS:
         print(f"  ⚠ {w}")
     if LANDSCAPE:
         _pw = (2 * TOTAL_SUBCOLS * SUB_CM + LAND_SLACK_CM
