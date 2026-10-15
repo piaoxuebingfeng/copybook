@@ -104,10 +104,37 @@ def ink_box(im, px_cm, y0_cm, y1_cm, x0_cm, x1_cm, margin=0.14):
     return (x0_cm + xs[0] / px_cm - margin, x0_cm + xs[-1] / px_cm + margin)
 
 
-def cut_x(im):
-    """裁切线的 x 像素。版式上它就落在纸张正中（纵向 21/2、横向 29.7/2），
-    所以直接用页宽的一半 —— 比去检测那排很淡的细虚线稳得多。"""
-    return im.width // 2
+def cut_line(im, orient):
+    """在页面正中附近找**真正的裁切线**，返回 (方向 'h'/'v', 位置像素)。
+
+    这里绝不能图省事取宽/高的一半：纵向版式的两张 A5 是**上下**堆叠的，裁切线是
+    横线；横向版式左右并排，裁切线是竖线。README 里的示意图曾经对纵向版式画了一条
+    **竖线**，把"上下裁开"标成了"左右裁开" —— 方向正好说反，就是因为在猜而不是在测。
+
+    判据用虚线的特征：白色/非白交替次数远多于实心格线。实测纵向版式裁切线在
+    49.6% 高处、交替 136 段，而普通横格线只有个位数，两者不会混。
+    """
+    a = np.asarray(im).astype(int)
+    nw = (a.sum(axis=2) < 720)
+    if orient == "portrait":
+        best = bestr = 0
+        for y in range(int(im.height * 0.42), int(im.height * 0.58)):
+            seg = nw[y]
+            if seg.sum() < 300 or abs(y - im.height / 2) > im.height * 0.08:
+                continue
+            r = int((np.diff(seg.astype(int)) == 1).sum())
+            if r > bestr:
+                best, bestr = y, r
+        return "h", best or im.height // 2
+    best = bestr = 0
+    for x in range(int(im.width * 0.42), int(im.width * 0.58)):
+        seg = nw[:, x]
+        if seg.sum() < 300 or abs(x - im.width / 2) > im.width * 0.08:
+            continue
+        r = int((np.diff(seg.astype(int)) == 1).sum())
+        if r > bestr:
+            best, bestr = x, r
+    return "v", best or im.width // 2
 
 
 def fit_height(im, h):
@@ -218,27 +245,51 @@ def main():
         made.append(p)
 
     # ---------- 4. 打印裁剪示意 ----------
-    im = render(*PORTRAIT, dpi=170)
-    x = cut_x(im)
-    d = ImageDraw.Draw(im)
-    # 高亮裁切线（把淡虚线描成醒目的红色虚线）
-    for y in range(0, im.height, 30):
-        d.line([x, y, x, min(y + 17, im.height)], fill=ACCENT, width=5)
-    # 标注气泡：放在下半页偏右，压到的是空白练习格，不会盖住字头
-    f = font(30)
-    label = "沿这条线剪开 →  上下/左右即两张 A5"
-    tw = d.textlength(label, font=f)
-    bx = min(x + 30, im.width - tw - 60)
-    by = int(im.height * 0.70)
-    pad = 18
-    d.rounded_rectangle([bx, by, bx + tw + pad * 2, by + 64], radius=12,
-                        fill=(255, 255, 255), outline=ACCENT, width=3)
-    d.text((bx + pad, by + 15), label, font=f, fill=ACCENT)
-    d.line([bx, by + 32, x, by + 32], fill=ACCENT, width=3)
-    im = with_title(im, "打印后沿中线剪开",
-                    "A4 上上下（或左右）排着两张 A5 —— 一页只练一个字，不剪也完全可以正常用")
+    # 裁切线是**从 PDF 里探测出来的**，不是想当然取宽/高的一半：
+    # 纵向版式的两张 A5 上下堆叠，裁切线是横线；横向版式左右并排，裁切线是竖线。
+    # 曾经这里对纵向版式画了一条竖线，把"上下裁开"标成了"左右裁开" —— 方向正好说反。
+    def annotate_cut(im, orient, label):
+        """把探测到的裁切线描成醒目的红色虚线，并在旁边放一个说明气泡。"""
+        axis, pos = cut_line(im, orient)
+        d = ImageDraw.Draw(im)
+        if axis == "h":                              # 上下两张 A5：横线
+            for x in range(0, im.width, 30):
+                d.line([x, pos, min(x + 17, im.width), pos], fill=ACCENT, width=5)
+        else:                                        # 左右两张 A5：竖线
+            for y in range(0, im.height, 30):
+                d.line([pos, y, pos, min(y + 17, im.height)], fill=ACCENT, width=5)
+        f = font(30)
+        tw = d.textlength(label, font=f)
+        pad = 18
+        if axis == "h":
+            bx = int(im.width * 0.30)
+            by = int(pos + im.height * 0.16)
+            d.rounded_rectangle([bx, by, bx + tw + pad * 2, by + 64], radius=12,
+                                fill=(255, 255, 255), outline=ACCENT, width=3)
+            d.text((bx + pad, by + 15), label, font=f, fill=ACCENT)
+            d.line([bx, by, bx + tw / 2, pos], fill=ACCENT, width=3)
+        else:
+            bx = int(im.width * 0.14)
+            by = int(im.height * 0.70)
+            d.rounded_rectangle([bx, by, bx + tw + pad * 2, by + 64], radius=12,
+                                fill=(255, 255, 255), outline=ACCENT, width=3)
+            d.text((bx + pad, by + 15), label, font=f, fill=ACCENT)
+            d.line([bx + tw + pad * 2, by + 32, pos, by + 32], fill=ACCENT, width=3)
+        return im
+
+    panels = [
+        annotate_cut(render(*PORTRAIT, dpi=170), "portrait", "沿这条横线剪开"),
+        annotate_cut(render(*LANDSCAPE, dpi=170), "landscape", "沿这条竖线剪开"),
+    ]
+    hero2 = hstack([panel(fit_height(im, 900), cap, sub)
+                    for im, cap, sub in zip(panels,
+                                            ("A4 纵向 · 上下两张 A5", "A4 横向 · 左右两张 A5"),
+                                            ("裁切线是横线 —— 沿它剪开，上下各一张",
+                                             "裁切线是竖线 —— 沿它剪开，左右各一张"))])
+    hero2 = with_title(hero2, "打印后沿正中裁切线剪开",
+                       "不剪也完全可以正常用：不剪就是一张 A4 练两个字，剪开就是一人一张 A5")
     p = os.path.join(OUT, "print-cut.png")
-    im.save(p, optimize=True)
+    hero2.save(p, optimize=True)
     made.append(p)
 
     for p in made:
