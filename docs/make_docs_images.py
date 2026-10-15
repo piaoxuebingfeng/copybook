@@ -201,6 +201,22 @@ def main():
     crop.save(p, optimize=True)
     made.append(p)
 
+    # ---------- 3b. 笔顺练习模式（--stroke-order）：田字格逐格练笔顺 ----------
+    SO = "output/示例_笔顺练习/示例_笔顺练习.pdf"
+    if os.path.exists(os.path.join(ROOT, SO)):
+        im3 = render(SO, 1, 420)
+        g3, _g3b = grid_region(green_lines(im3, px_cm), CELL)
+        # 取「水」的第一行田字格（8 格）——正好是两遍笔顺的前 4 个阶段，
+        # 一眼能看出墨迹一格格变多
+        box = (int(0.5 * px_cm), int(g3 * px_cm),
+               int(20.4 * px_cm), int((g3 + CELL) * px_cm))
+        crop = with_title(im3.crop(box), "③ 笔顺练习模式（--stroke-order）",
+                          "每个田字格都按笔顺递进：第 1 格只有第 1 笔、第 2 格前 2 笔……"
+                          "练 3 遍、再重复 3 个整字，剩下的格子留白自己写")
+        p = os.path.join(OUT, "zoom-stroke-order.png")
+        crop.save(p, optimize=True)
+        made.append(p)
+
     # ---------- 4. 打印裁剪示意 ----------
     im = render(*PORTRAIT, dpi=170)
     x = cut_x(im)

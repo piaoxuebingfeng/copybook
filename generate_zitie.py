@@ -158,6 +158,10 @@ DASH = Side(style="dashed", color=GRAY)
 # ---- 命令行参数 ----
 TRACE_INSET_PX = int(ARG.get("--trace-inset", 4))
 CHARS_ARG = ARG.get("--chars", "")
+# 笔顺练习模式：田字格里逐格递进"前 k 笔"，而不只是前面几格放整字描红
+STROKE_ORDER = ARG.get("--stroke-order", "") == "1"
+SO_ROUNDS = int(ARG.get("--stroke-rounds", 3))     # 笔顺序列想练几遍
+SO_FULLS = int(ARG.get("--stroke-fulls", 3))       # 练完笔顺后想重复几个整字
 DATA_FILE = ARG.get("--data", f"{ROOT}/stroke_data_cn.json")
 TITLE = ARG.get("--title", "幼小衔接 · 汉字笔顺字帖")
 SUBTITLE = ARG.get("--subtitle",
@@ -332,6 +336,36 @@ def build():
     return wb, ws, r, blocks
 
 
+def stroke_order_plan(n, m, rounds=None, fulls=None):
+    """给一个 n 画的字和 m 个田字格，排出每格放什么。
+
+    返回长度为 m 的列表，元素含义：
+        int k  -> 这一格放「前 k 笔」（笔顺阶段）
+        "full" -> 整字描红
+        None   -> 留白，留给学生自己写
+
+    理想排法：笔顺练 3 遍 -> 整字 3 个 -> 剩下的留白。
+    格子不够就降级：先减整字的个数，再减笔顺的遍数（优先保证笔顺练到）。
+    连「1 遍笔顺 + 1 个整字」都放不下（笔画比格子还多）时，把整遍笔顺均匀压缩
+    进前面的格子，仍按顺序从头走到尾，一笔不漏。
+    """
+    rounds = SO_ROUNDS if rounds is None else rounds
+    fulls = SO_FULLS if fulls is None else fulls
+    for r, f in [(rounds, fulls), (rounds, 2), (rounds, 1),
+                 (2, fulls), (2, 2), (2, 1), (1, fulls), (1, 2), (1, 1)]:
+        if r * n + f <= m:
+            seq = [k for _ in range(r) for k in range(1, n + 1)] + ["full"] * f
+            return seq + [None] * (m - len(seq))
+    # 笔画比格子还多：压缩成 1 遍。第一格给第 1 笔，最后一格给全部 n 笔，中间均匀递进。
+    stages = max(1, m - 1)
+    if stages == 1:
+        seq = [n]
+    else:
+        seq = [1 + round((k - 1) * (n - 1) / (stages - 1)) for k in range(1, stages + 1)]
+    seq.append("full")
+    return seq + [None] * (m - len(seq))
+
+
 def place_inset_image(ws, path, col0, row0, size_px, inset_px):
     """把图片放进单元格，四周内缩 inset_px —— 这样不会遮住格子边框。"""
     im = XLImage(path)
@@ -347,6 +381,8 @@ def place_inset_image(ws, path, col0, row0, size_px, inset_px):
 
 
 def add_images(ws, blocks):
+    """把教学条和描红图放上去。返回笔顺模式下每个字的排布方案（供打印摘要）。"""
+    plans = []
     for b in blocks:
         ch = b["char"]
         m = META[ch]
@@ -359,10 +395,29 @@ def add_images(ws, blocks):
         ws.add_image(im, f"{get_column_letter(_c0)}{b['strip_row']}")
 
         tr = f"{TRACES_DIR}/{ch}.png"
-        if os.path.exists(tr):
-            r0 = b["grid_rows"][0] - 1        # AnchorMarker 的 row/col 从 0 开始
+        if not os.path.exists(tr):
+            continue
+        grid_rows = b["grid_rows"]
+        if STROKE_ORDER:
+            cells = len(grid_rows) * CELLS_PER_ROW
+            plan = stroke_order_plan(b["n"], cells)
+            plans.append((ch, b["n"], cells, plan))
+            for c, item in enumerate(plan):
+                if item is None:                       # 留白格
+                    continue
+                src = tr if item == "full" else f"{TRACES_DIR}/{ch}_{item}.png"
+                if not os.path.exists(src):
+                    continue
+                # 格号 -> 第几行 / 行内第几格；每个田字格占 2 个子列
+                place_inset_image(ws, src,
+                                  _c0 - 1 + 2 * (c % CELLS_PER_ROW),
+                                  grid_rows[c // CELLS_PER_ROW] - 1,
+                                  CELL_PX, TRACE_INSET_PX)
+        else:
+            r0 = grid_rows[0] - 1        # AnchorMarker 的 row/col 从 0 开始
             for k in range(TRACE_CELLS):
                 place_inset_image(ws, tr, _c0 - 1 + 2 * k, r0, CELL_PX, TRACE_INSET_PX)
+    return plans
 
 
 def add_page_breaks(ws, blocks):
@@ -632,7 +687,7 @@ if __name__ == "__main__":
     else:
         wb, ws, last_row, blocks = build()
         nb = None
-    add_images(ws, blocks)
+    plans = add_images(ws, blocks)
     if nb is None:
         nb = add_page_breaks(ws, blocks)
     ws.print_area = f"A1:{get_column_letter(PRINT_COLS)}{last_row}"
@@ -642,6 +697,15 @@ if __name__ == "__main__":
     print(f"已生成 {_OUT}   [模式 {_MODE} / 版式 {LAYOUT}"
           f"{' 横向' if LANDSCAPE else ' 纵向' if LAYOUT == 'a5' else ''}]")
     print(f"  字数 {len(blocks)}　末行 {last_row}　分页符 {nb} 个")
+    if STROKE_ORDER:
+        print(f"  笔顺练习模式：每字理想排布 = 笔顺 {SO_ROUNDS} 遍 + 整字 {SO_FULLS} 个 + 留白"
+              f"（格子不够先减整字、再减遍数；笔画多于格子时压缩成 1 遍）")
+        for ch, n, cells, plan in plans:
+            st = sum(1 for x in plan if isinstance(x, int))
+            fl = sum(1 for x in plan if x == "full")
+            bl = plan.count(None)
+            desc = f"笔顺 {st // n} 遍" if n and st % n == 0 else f"笔顺压缩 1 遍（{st} 格）"
+            print(f"    {ch}　{n:2d} 画 / {cells:2d} 格 -> {desc} + 整字 {fl} + 留白 {bl}")
     print(f"  子列宽 {SUB_COL_W}　子行高 {SUB_ROW_PT}pt　"
           f"-> 田字格 {CELL_CM}x{CELL_CM}cm ({CELL_PX:.1f}px)")
     for w in TEXT_WARNINGS:

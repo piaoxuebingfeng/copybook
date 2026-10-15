@@ -72,6 +72,14 @@ HELP = """
   --thin=N                 笔画减细量 0~20，默认 10（越大笔画越细）
   --strip-max-cm=16        笔顺教学条单行宽度上限，默认 16（= 田字格总宽）
 
+笔顺练习模式：
+  --stroke-order           打开后，每个字的所有田字格都用来练笔顺：
+                           第 1 格写第 1 笔、第 2 格写前 2 笔……第 N 格写完整字，
+                           如此练 3 遍，再重复 3 个整字，剩下的格子留白给学生自己写。
+                           格子不够时自动降级（先减整字、再减遍数），
+                           笔画比格子还多时把一遍笔顺均匀压缩进格子，顺序一笔不漏。
+                           默认关闭（关闭时是原来的排法：每行前 3 格整字描红，其余留白）
+
 输出：
   --name=名字              输出目录 / 文件名（默认由字表自动生成）
   --pdf                    同时导出 PDF（默认：装了 LibreOffice 就导出）
@@ -106,6 +114,7 @@ def parse_args(argv):
         "orient": "portrait",    # portrait=纵向(上下两个A5)；landscape=横向(左右两个A5)
         "cell_cm": "",           # 田字格边长，留空则 a5=2.4cm / a4=2.0cm
         "outdir": os.path.join(ROOT, "output"),
+        "stroke_order": False,   # 田字格里逐格练笔顺
     }
     if any(a in ("-h", "--help", "help") for a in argv):
         print(HELP)
@@ -114,7 +123,7 @@ def parse_args(argv):
         if a.startswith("--"):
             k, _, v = a[2:].partition("=")
             k = k.replace("-", "_")
-            if k in ("pdf", "setup"):
+            if k in ("pdf", "setup", "stroke_order"):
                 o[k] = True
             elif k == "no_pdf":
                 o["pdf"] = False
@@ -207,6 +216,9 @@ def main():
     if o["orient"] == "landscape" and o["layout"] != "a5":
         die("--orient=横向 只适用于 --layout=a5（一张 A4 放 2 个字）")
     cell_opt = [f"--cell-cm={o['cell_cm']}"] if o["cell_cm"] else []
+    # 笔顺练习模式：渲染阶段图（前 k 笔），并让拼装脚本按序列铺满田字格
+    so_opt = ["--stroke-order"] if o["stroke_order"] else []
+    stages_opt = ["--stages"] if o["stroke_order"] else []
 
     def run(step, args):
         print(f"  · {step}")
@@ -225,14 +237,17 @@ def main():
         print(f"  版式：一张 A4 放 2 个字，{_d}（田字格 {_cm}cm）")
     else:
         print(f"  版式：一张 A4 放 4 个字（田字格 {_cm}cm）")
+    if o["stroke_order"]:
+        print("  笔顺练习模式：每个字的田字格都按笔顺逐格递进（--stroke-order）")
     run("渲染笔顺教学条", ["render_strokes.py", f"--chars={cspec}",
                         f"--out={strips}", f"--meta={meta}", f"--thin={o['thin']}",
                         f"--strip-max-cells={_strip_cells(o)}"])
-    run("渲染田字格描红", ["render_trace.py", f"--chars={cspec}", f"--out={traces}"])
+    run("渲染田字格描红", ["render_trace.py", f"--chars={cspec}", f"--out={traces}",
+                         *stages_opt])
     out = run("拼装字帖", ["generate_zitie.py", f"--chars={cspec}",
                          f"--strokes={strips}", f"--meta={meta}", f"--traces={traces}",
                          "--trace-inset=0", f"--mode={o['mode']}",
-                         f"--layout={o['layout']}", *cell_opt,
+                         f"--layout={o['layout']}", *cell_opt, *so_opt,
                          f"--title={title}", f"--out={xlsx}",
                          f"--orient={o['orient']}"])
     for line in out.strip().splitlines():
@@ -250,6 +265,7 @@ def main():
                                         f"--strokes={strips}", f"--meta={meta}",
                                         f"--traces={traces}", "--trace-inset=0",
                                         "--mode=lo", f"--layout={o['layout']}", *cell_opt,
+                                        *so_opt,
                                         f"--title={title}", f"--out={tmp_x}",
                                         f"--orient={o['orient']}"])
             pdfdir = os.path.join(work, "_pdf")

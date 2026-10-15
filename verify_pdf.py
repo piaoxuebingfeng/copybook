@@ -24,6 +24,12 @@ COLS = next((int(a.split("=",1)[1]) for a in sys.argv[1:]
 DPI = 300
 PX_CM = DPI / 2.54
 TRACE_CELLS = TRACE_CELLS_ARG or 3
+# --stroke-order：笔顺练习模式。此时每个字的**所有**田字格都贴了图（第 1 格第 1 笔、
+# 第 2 格前 2 笔……），不再是"每字一行 3 格描红"，所以：
+#   · 一行里只要有 1 格有粉色就算"带描红的行"（原来是要求 3 格全有）
+#   · 预期行数 = 全部田字格行（原来 = 字数），精确的逐格顺序交给 verify_stroke_order.py
+STROKE_ORDER = "--stroke-order" in sys.argv
+NEED_CELLS = 1 if STROKE_ORDER else TRACE_CELLS
 doc = pymupdf.open(PDF)
 PW, PH = doc[0].rect.width / 72 * 2.54, doc[0].rect.height / 72 * 2.54
 MARGIN = 0.8
@@ -44,6 +50,7 @@ def bands(mask_1d, gap_px, min_len=1):
 
 problems = []
 total_rows = total_clusters = 0
+expect_rows = 0          # 笔顺模式：全部田字格行数（每行都该有图）
 all_per = []
 print(f"文件 {PDF}")
 PAGES = int(sys.argv[4]) if len(sys.argv) > 4 else None
@@ -104,6 +111,7 @@ for pno, page in enumerate(doc):
     # 教学条里"这一笔"的深红色（描红行只有粉色，没有深红）
     red = (r > 150) & (g < 110) & (b < 110)
     per = []
+    grid_rows_here = 0          # 本页去掉教学条之后的真田字格行数
     trace_band = None
     # 教学条图片用的是和格子**同一个绿色**画边框（风格统一），它的上下边缘也是长绿线；
     # 而"字头行高 + 教学条高"恰好也是一个格子高 —— 所以整条教学条会被当成一行田字格，
@@ -117,22 +125,24 @@ for pno, page in enumerate(doc):
         _red_n = red[int((y0c + 0.10) * PX_CM):int((y1c - 0.10) * PX_CM)].sum()
         if _red_n > 500:            # 这是教学条，不是田字格行
             continue
+        grid_rows_here += 1         # 跳过教学条后剩下的才是真田字格行
         s = int((y0c + 0.10) * PX_CM)
         e = int((y1c - 0.10) * PX_CM)
         band = pink[s:e, :]
         for _ox in (BLOCKS or [origin]):        # 每个田字格块各查一次
             hit = 0
-            for k in range(TRACE_CELLS):
+            for k in range(NEED_CELLS if STROKE_ORDER else TRACE_CELLS):
                 xa = int((_ox + CELL_CM * k + 0.10 * CELL_CM) * PX_CM)
                 xb = int((_ox + CELL_CM * k + 0.90 * CELL_CM) * PX_CM)
                 if band[:, xa:xb].sum() > 300:  # 阈值滤掉红色笔画的浅色反锯齿边缘
                     hit += 1
-            if hit == TRACE_CELLS:  # 只有"三格全有描红"才算一个字的描红行；
-                per.append(hit)     # hit<3 的是教学条粉色示范格/反锯齿造成的误报
+            if hit >= NEED_CELLS:
+                per.append(hit)
                 if trace_band is None:
                     trace_band = (y0c, y1c)
     nchar = len(per)
     all_per.extend(per)
+    expect_rows += grid_rows_here * (len(BLOCKS) if BLOCKS else 1)
 
     # --- 几何：格高取格线间距；格宽在真正的田字格行内量竖直绿线 ---
     cw = ch = float("nan")
@@ -164,14 +174,29 @@ for pno, page in enumerate(doc):
         problems.append(f"第{pno+1}页 格子不是正方形：宽 {cw:.3f} 高 {ch:.3f}")
 
 print()
-print(f"描红统计：带描红的田字格行 {total_rows} 行（预期 {NCHAR}）"
-      f"，描红格合计 {total_clusters} 个（预期 {NCHAR*TRACE_CELLS}）")
-if total_rows != NCHAR:
-    problems.append(f"带描红的田字格行 {total_rows} != {NCHAR}")
-if total_clusters != NCHAR * TRACE_CELLS:
-    problems.append(f"描红格合计 {total_clusters} != {NCHAR*TRACE_CELLS}")
-if any(p != TRACE_CELLS for p in all_per):
-    problems.append(f"有字的描红格数不是 {TRACE_CELLS}: {all_per}")
+if STROKE_ORDER:
+    print(f"描红统计（笔顺练习模式）：每行只查第 1 格 —— 带图的田字格行 {total_rows} 行"
+          f"（实际田字格行 {expect_rows} 行以内）")
+    # 笔顺模式下"留白"是设计的一部分（笔顺练 3 遍 + 整字 3 个之后才留白），
+    # 所以不能要求"每一行都有图"。这里只守住两头：每个字至少有一行有图、
+    # 有图的行不超过实际田字格行数。每一格到底铺了什么，由 verify_stroke_order.py
+    # 回到文件里逐格精确核对。
+    if total_rows < NCHAR:
+        problems.append(f"带描红的田字格行只有 {total_rows} 行，少于字数 {NCHAR}"
+                        f"（有整个字没贴上）")
+    if total_rows > expect_rows:
+        problems.append(f"带描红的田字格行 {total_rows} 超过实际田字格行 {expect_rows}")
+    if total_clusters < NCHAR:
+        problems.append(f"描红格合计 {total_clusters} 少于字数 {NCHAR}")
+else:
+    print(f"描红统计：带描红的田字格行 {total_rows} 行（预期 {NCHAR}）"
+          f"，描红格合计 {total_clusters} 个（预期 {NCHAR*TRACE_CELLS}）")
+    if total_rows != NCHAR:
+        problems.append(f"带描红的田字格行 {total_rows} != {NCHAR}")
+    if total_clusters != NCHAR * TRACE_CELLS:
+        problems.append(f"描红格合计 {total_clusters} != {NCHAR*TRACE_CELLS}")
+    if any(p != TRACE_CELLS for p in all_per):
+        problems.append(f"有字的描红格数不是 {TRACE_CELLS}: {all_per}")
 
 print()
 _pg = min(1, doc.page_count - 1)     # 单页文档就查第 1 页

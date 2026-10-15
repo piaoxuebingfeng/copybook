@@ -25,6 +25,7 @@ Excel + PDF 双格式 · 几何精确到 0.1mm · 完全离线
 [为什么写这个工具](#为什么写这个工具) ·
 [它长什么样](#它长什么样) ·
 [三种打印版式](#三种打印版式) ·
+[两种练习方式](#两种练习方式) ·
 [快速开始](#快速开始) ·
 [打印与裁剪](#打印与裁剪) ·
 [命令行参数](#命令行参数) ·
@@ -97,6 +98,51 @@ Excel + PDF 双格式 · 几何精确到 0.1mm · 完全离线
 
 ---
 
+## 两种练习方式
+
+田字格里放什么，由 `--stroke-order` 决定。
+
+**默认（不加参数）—— 描红 + 自己写。** 每个字的第一行前 3 格是整字描红，其余留白：
+
+![田字格描红](docs/zoom-grid.png)
+
+**笔顺练习模式（`--stroke-order`）—— 每一格都练笔顺。**
+第 1 格只有第 1 笔，第 2 格前 2 笔……第 N 格才是完整的字。这样练 3 遍，
+再重复 3 个整字，剩下的格子留白自己写：
+
+![笔顺练习模式](docs/zoom-stroke-order.png)
+
+上图是「水」的第一行 8 格：左边 4 格是第 1 遍的逐笔递进，右边 4 格是第 2 遍，
+墨迹一格格变多，孩子照着顺序描就行。
+
+```bash
+python3 zitie_gen.py 水火日月 --stroke-order                    # A4 纵向，每字 32 格
+python3 zitie_gen.py 水火日月 --stroke-order --orient=landscape # A4 横向，每字 10 格
+```
+
+### 格子不够时怎么降级
+
+每个字能分到多少田字格，是由笔画数（教学条占几行）决定的，所以排布会自动调整：
+
+| 字 | 每字格子 | 实际排布 |
+| --- | --- | --- |
+| 水、火（4 画） | 32 格 | 笔顺 3 遍 + 整字 3 个 + 留白 17 格 |
+| 间（7 画） | 16 格 | 笔顺 2 遍 + 整字 2 个 + 留白 0 |
+| 影（15 画） | 8 格 | 笔顺压缩成 1 遍（每格递进 1~3 笔）+ 整字 1 个 |
+
+降级顺序是固定的：**先减整字的个数，再减笔顺的遍数**，优先保证笔顺练到。
+笔画比格子还多时（≥14 画的字只有 8 格），把一遍笔顺均匀压缩进格子 ——
+第 1 格给第 1 笔、最后一格给全部笔画，顺序一笔不漏。
+
+生成时会把每个字的实际排布打印出来，不用自己算：
+
+```text
+水　 4 画 / 32 格 -> 笔顺 3 遍 + 整字 3 + 留白 17
+影　15 画 /  8 格 -> 笔顺压缩 1 遍（7 格） + 整字 1 + 留白 0
+```
+
+---
+
 ## 快速开始
 
 ```bash
@@ -146,12 +192,14 @@ python3 zitie_gen.py --help
 
 ## 打印与裁剪
 
-![打印与裁剪](docs/print-cut.png)
+打印时选**实际大小 / 100%**，不要用「适应页面」—— 那样整页会被缩放，
+格子就不是 2.38cm 的正方形了（`verify_pdf.py` 专门检查这一点）。
+纸型 A4，页边距不用调，打印区域在生成时已经设好。
 
-* 直接打印 PDF 就行：**纸张 A4、缩放选「无」或「实际大小」**。
-  千万别选「适合页面」——那会把格子一起缩小。
-* 打印完沿每页正中的虚线剪开，就是两张 A5，一页正好练一个字。
-* 不剪也完全可以用，只是两张 A5 连在一起。
+每页正中有一条裁切线：纵向版式是横线、横向版式是竖线。沿线剪开就是两张 A5，
+一张一个字，正好是一次练习量。
+
+![打印与裁剪](docs/print-cut.png)
 
 ---
 
@@ -167,6 +215,7 @@ python3 zitie_gen.py --help
 | `--layout=a4` | 紧凑版式，一张 A4 放 4 个字。也可写 `--layout=4` | — |
 | `--orient=portrait` | A4 纵向，上下两张横版 A5，8 格/行。也可写 `纵向` / `v` | `portrait` |
 | `--orient=landscape` | A4 横向，左右两张竖版 A5，5 格/行。也可写 `横向` / `h` | — |
+| `--stroke-order` | 田字格逐格练笔顺（见[两种练习方式](#两种练习方式)） | 关闭 |
 | `--cell-cm=2.4` | 田字格边长（会取整到整数像素，保证是正方形） | a5→2.4 / a4→2.0 |
 | `--thin=N` | 笔画减细量，0~20。嫌笔画粗就调大 | `10` |
 | `--strip-max-cm=16` | 教学条单行宽度上限（即田字格总宽） | `16` |
@@ -219,10 +268,11 @@ python3 zitie_gen.py --help
 | --- | --- | --- |
 | `verify_data.py` | 笔画数据 | `strokes`/`medians` 数量是否一致、坐标是否都在 0..1024 内、轮廓是否闭合（不闭合填充描红会漏色）、包围盒是否有效 |
 | `verify_render.py` | 渲染出的教学条图片 | 格数 = 笔画数 + 1、每一格是不是只有「当前这一笔」是红的、黑笔是否逐格累加、描红格是不是只有粉色 |
+| `verify_stroke_order.py` | 笔顺练习模式的每一格 | 回到 xlsx 里按**图片像素内容**反查每张图是「哪个字的第几阶段」，还原阅读顺序，和排布算法逐格比对（能抓出铺错格、顺序颠倒、留白没留） |
 | `verify_pdf.py` | 最终 PDF 的页面 | 页面尺寸、内容有没有越出页边距、有没有被 `fitToWidth` 缩小、格子是不是正方形、描红格数量、五种颜色是否齐全 |
 | `verify_strips.py` | 最终 PDF 里的教学条 | 有没有被打印区域裁掉、有没有溢出纸张 |
 
-前两个查「生成过程中的中间产物」，后两个查「真正打印出去的东西」。都能直接跑：
+前三个查「生成过程中的中间产物」，后两个查「真正打印出去的东西」。都能直接跑：
 
 ```bash
 # 先生成一帖：4 个字、2 页
@@ -233,6 +283,9 @@ python3 verify_data.py
 python3 verify_render.py output/字帖_一二三十/strips
 python3 verify_pdf.py output/字帖_一二三十/字帖_一二三十.pdf 4 3 2 2.38125 --cols=8
 python3 verify_strips.py output/字帖_一二三十/字帖_一二三十.pdf --cols=8
+
+# 笔顺练习模式：逐格核对铺进去的顺序（横向版式加 --cols=5）
+python3 verify_stroke_order.py output/示例_笔顺练习
 ```
 
 `verify_pdf.py` 后面那串参数依次是：PDF、字数、每字描红格数、页数、田字格边长（cm）。
@@ -292,11 +345,12 @@ python3 verify_strips.py output/字帖_一二三十/字帖_一二三十.pdf --co
 ├── zitie_gen.py          总入口，日常只需要运行这个
 ├── generate_zitie.py     排版成 Excel（田字格 / 裁切线 / 打印区域）
 ├── render_strokes.py     渲染笔顺教学条（逐笔演示 + 描红示范）
-├── render_trace.py       渲染田字格描红图
+├── render_trace.py       渲染田字格描红图（--stages 额外输出笔顺阶段图）
 ├── stroke_lib.py         SVG 路径解析 + 中文字体探测
 ├── stroke_store.py       笔画数据仓库（本地字库 + 自动解压）
 ├── verify_data.py        校验：笔画数据完整性
 ├── verify_render.py      校验：教学条图片像素级结构
+├── verify_stroke_order.py 校验：笔顺练习模式每一格铺了什么
 ├── verify_pdf.py         验收：页面几何 / 颜色 / 描红数量
 ├── verify_strips.py      验收：教学条是否被裁切
 │
@@ -338,6 +392,9 @@ produces print-ready stroke-order tracing worksheets as both `.xlsx` and `.pdf`.
   is within 0.1 mm of the sheet centre. Verified by bundled scripts that measure the exported PDF.
 * **Fully offline**: a 9,575-character stroke database ships with the repo.
 * Three layouts (`--layout=a5|a4`) × two A4 orientations (`--orient=portrait|landscape`).
+* `--stroke-order` fills **every** 田字格 with the stroke-by-stroke progression
+  (cell 1 = stroke 1, cell 2 = strokes 1-2, …), three rounds, then three full
+  characters, then blank cells — so children practise the writing order, not just tracing.
 
 ```bash
 pip install -r requirements.txt

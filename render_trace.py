@@ -30,12 +30,15 @@ SS_TRACE = 5                      # 超采样：240*5 = 1200 -> 缩到 300
 
 OUT_DIR = f"{ROOT}/trace_images_fill"
 CHARS_ARG = ""
+STAGES = False                    # --stages：额外输出 {字}_{k}.png（笔顺前 k 阶段）
 for _a in sys.argv[1:]:
     if _a.startswith("--out="):
         _v = _a.split("=", 1)[1]
         OUT_DIR = _v if _v.startswith("/") else f"{ROOT}/{_v}"
     elif _a.startswith("--chars="):
         CHARS_ARG = _a.split("=", 1)[1]
+    elif _a == "--stages":
+        STAGES = True
 
 REQ = []
 if CHARS_ARG:
@@ -44,16 +47,30 @@ if CHARS_ARG:
     R.DATA.update(stroke_store.load_many(REQ))
 
 
-def render_trace(ch):
-    n = len(R.DATA[ch]["strokes"])
+def render_ids(ch, ids):
+    """把指定的一批笔画画成浅粉描红图。
+
+    ids 传 range(n) 就是整字，传 range(k) 就是「只画前 k 笔」——
+    笔顺练习格用的就是后者。
+    """
     inner_s = (R.F - 2 * R.PAD) * SS_TRACE / R.BOX
     erode_px = R.THIN_UNITS * inner_s          # 与教学行完全相同的减细量
-    m = R.stroke_mask(ch, range(n), SS_TRACE, erode_px)
+    m = R.stroke_mask(ch, ids, SS_TRACE, erode_px)
     m = m.resize((SIZE, SIZE), Image.LANCZOS)
 
     im = Image.new("RGBA", (SIZE, SIZE), PINK + (255,))
     im.putalpha(m)
     return im
+
+
+def render_trace(ch):
+    """整字描红。"""
+    return render_ids(ch, range(len(R.DATA[ch]["strokes"])))
+
+
+def render_stage(ch, k):
+    """笔顺第 k 阶段：只画前 k 笔（k = 1..n，k = n 时就是整字）。"""
+    return render_ids(ch, range(k))
 
 
 def check(im):
@@ -78,6 +95,7 @@ if __name__ == "__main__":
     CHARS = (REQ if CHARS_ARG else list(R.DEFAULT_CHARS))
     os.makedirs(OUT_DIR, exist_ok=True)
     bad, offs = [], []
+    stages = 0
     for ch in CHARS:
         im = render_trace(ch)
         p, dx, dy = check(im)
@@ -85,9 +103,16 @@ if __name__ == "__main__":
             bad.append((ch, p))
         offs.append((abs(dx), abs(dy), ch))
         im.save(f"{OUT_DIR}/{ch}.png")
+        # 笔顺练习格要的阶段图：第 k 张只画前 k 笔
+        if STAGES:
+            for k in range(1, len(R.DATA[ch]["strokes"]) + 1):
+                render_stage(ch, k).save(f"{OUT_DIR}/{ch}_{k}.png")
+                stages += 1
     o = np.array([(a, b) for a, b, _ in offs])
     mm = 20 / SIZE
     print(f"共 {len(CHARS)} 张 -> {OUT_DIR}")
+    if STAGES:
+        print(f"另输出笔顺阶段图 {stages} 张（{OUT_DIR}/{{字}}_{{k}}.png，第 k 张 = 前 k 笔）")
     print(f"字形来源 = 笔画轮廓填充（与教学行同源）；减细量 = {R.THIN_UNITS}")
     print(f"墨迹中心相对格子中心：|dx| 最大 {o[:,0].max():.1f}px ({o[:,0].max()*mm:.2f}mm)，"
           f"|dy| 最大 {o[:,1].max():.1f}px ({o[:,1].max()*mm:.2f}mm)")
